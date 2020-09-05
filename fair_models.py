@@ -27,7 +27,7 @@ def generalized_entropy_index(model, X, y_true, alpha=2):
         return np.mean((b/np.mean(b))**alpha-1)/(alpha*(alpha-1))
 
 def coefficient_of_variation(model, X, y_true):
-    return generalized_entropy_index(model, X, y_true, alpha=2)
+    return 2*(generalized_entropy_index(model, X, y_true, alpha=2)**0.5)
 
 class FairScalarization(w_interface, single_interface, scalar_interface):
     def __init__(self, X, y, fair_feature):
@@ -135,6 +135,7 @@ class MOOLogisticRegression():
             if perf>self.best_perf:
                 self.best_perf = perf
                 self.best_model = solution.x
+
         return self.best_model
         
 class FindCLogisticRegression():
@@ -167,12 +168,12 @@ class FindCLogisticRegression():
         elif self.metric=='p_percent':
             perf = p_percent_score(sensitive_column="Sex")(model, self.X_val)
         elif self.metric=='c_variation':
-            perf = coefficient_of_variation(model, self.X_val, self.y_val)
+            perf = 1/coefficient_of_variation(model, self.X_val, self.y_val)
         
         if perf>self.best_perf:
             self.best_perf = perf
             self.best_model = model
-        
+
         error = 1-perf
 
         return error  # An objective value linked with the Trial object.
@@ -222,7 +223,7 @@ class FindCCLogisticRegression():
         elif self.metric=='p_percent':
             perf = p_percent_score(sensitive_column="Sex")(model, self.X_val)
         elif self.metric=='c_variation':
-                perf = coefficient_of_variation(model, self.X_val, self.y_val)
+            perf = 1/coefficient_of_variation(model, self.X_val, self.y_val)
         
         if perf>self.best_perf:
             self.best_perf = perf
