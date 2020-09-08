@@ -130,7 +130,7 @@ class MOOLogisticRegression():
             elif self.metric=='p_percent':
                 perf = p_percent_score(sensitive_column="Sex")(solution.x, self.X_val)
             elif self.metric=='c_variation':
-                perf = coefficient_of_variation(solution.x, self.X_val, self.y_val)
+                perf = 1/coefficient_of_variation(solution.x, self.X_val, self.y_val)
             
             if perf>self.best_perf:
                 self.best_perf = perf
