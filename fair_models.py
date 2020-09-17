@@ -14,20 +14,21 @@ from sklego.linear_model import EqualOpportunityClassifier
 from sklearn.linear_model import LogisticRegression
 import optuna
 
-def generalized_entropy_index(model, X, y_true, alpha=2):
+def generalized_entropy_index(model, X, y_true, alpha=2, target=1):
     y_pred = model.predict(X)
 
-    b = 1 + y_pred - y_true
+    b = 1 + 1*(y_pred==target) - 1*(y_true==target)
+    mi = np.mean(b)
 
     if alpha == 1:
-        return np.mean(np.log((b/np.mean(b))**b)/np.mean(b))
+        return np.mean(np.log((b/mi)**b)/mi)
     elif alpha == 0:
-        return -np.mean(np.log(b/np.mean(b))/np.mean(b))
+        return -np.mean(np.log(b/mi)/mi)
     else:
-        return np.mean((b/np.mean(b))**alpha-1)/(alpha*(alpha-1))
+        return np.mean((b/mi)**alpha-1)/(alpha*(alpha-1))
 
-def coefficient_of_variation(model, X, y_true):
-    return 2*(generalized_entropy_index(model, X, y_true, alpha=2)**0.5)
+def coefficient_of_variation(model, X, y_true, target=1):
+    return 2*(generalized_entropy_index(model, X, y_true, alpha=2, target=target)**0.5)
 
 class FairScalarization(w_interface, single_interface, scalar_interface):
     def __init__(self, X, y, fair_feature):
@@ -79,11 +80,12 @@ class FairScalarization(w_interface, single_interface, scalar_interface):
             lambd = self.__w[-1]/(1-self.__w[-1])
         fair_weight = self.__w[:-1]*(1+lambd)
         
-        sample_weight = self.X[self.fair_feature].replace({ff:fw for ff, fw in zip(self.fair_att,fair_weight)})
-        #sample_weight = self.X[self.fair_feature].replace({ff:fw/sum(X[self.fair_feature]==ff) for ff, fw in zip(self.fair_att,fair_weight)})
-        reg = LogisticRegression(multi_class='multinomial', solver='lbfgs',
-                                 penalty='l2', max_iter=10**6, tol=10**-6, 
-                                 C=1/lambd).fit(self.X, self.y, sample_weight=sample_weight)
+        #sample_weight = self.X[self.fair_feature].replace({ff:fw for ff, fw in zip(self.fair_att,fair_weight)})
+        sample_weight = self.X[self.fair_feature].replace({ff:fw/sum(self.X[self.fair_feature]==ff) for ff, fw in zip(self.fair_att,fair_weight)})
+        prec = np.mean(sample_weight)
+        reg = LogisticRegression(multi_class='multinomial', solver='lbfgs', class_weight=None,
+                                 penalty='l2', max_iter=10**4, tol=prec*10**-6, 
+                                 C=1/lambd).fit(self.X, self.y, sample_weight=sample_weight.values)
         
         y_pred = reg.predict_proba(self.X)
         
@@ -92,12 +94,11 @@ class FairScalarization(w_interface, single_interface, scalar_interface):
             fair_weight = np.zeros(len(self.fair_att))
             fair_weight[i] = 1
             sample_weight = self.X[self.fair_feature].replace({ff:fw for ff, fw in zip(self.fair_att,fair_weight)})
-            self.__objs[i] = log_loss(self.y, y_pred, sample_weight=sample_weight)*sum(self.X[self.fair_feature]==feat)
-            #self.__objs[i] = log_loss(y, y_pred, sample_weight=sample_weight)
+            #self.__objs[i] = log_loss(self.y, y_pred, sample_weight=sample_weight)*sum(self.X[self.fair_feature]==feat)
+            self.__objs[i] = log_loss(self.y, y_pred, sample_weight=sample_weight)
         
         self.__objs[-1] = squared_norm(reg.coef_)
         self.__x = reg
-        #print('objs', self.__objs)
         return self
 
 class MOOLogisticRegression():
@@ -106,16 +107,21 @@ class MOOLogisticRegression():
         self.y_train = y_train
         self.X_val = X_val
         self.y_val = y_val
+        self.metric = metric
+        self.moo_ = None
+
+    def tune(self, metric=None):
         self.best_perf = 0
         self.best_model = None
-        self.metric = metric
 
-    def tune(self):
-        moo_ = monise(weightedScalar=FairScalarization(self.X_train, self.y_train, 'Sex'), singleScalar=FairScalarization(self.X_train, self.y_train, 'Sex'),
-                      nodeTimeLimit=2, targetSize=150,
-                      targetGap=0, nodeGap=0.01, norm=False)
-        moo_.optimize()
-        for solution in moo_.solutionsList:
+        if metric is not None:
+            self.metric = metric
+        if self.moo_ is None:
+            self.moo_ = monise(weightedScalar=FairScalarization(self.X_train, self.y_train, 'Sex'), singleScalar=FairScalarization(self.X_train, self.y_train, 'Sex'),
+                          nodeTimeLimit=2, targetSize=150,
+                          targetGap=0, nodeGap=0.01, norm=False)
+            self.moo_.optimize()
+        for solution in self.moo_.solutionsList:
             y_pred = solution.x.predict(self.X_val)
             
             if (sklearn.metrics.accuracy_score(self.y_val, y_pred)==0 or
@@ -174,7 +180,7 @@ class FindCLogisticRegression():
             self.best_perf = perf
             self.best_model = model
 
-        error = 1-perf
+        error = 1/perf
 
         return error  # An objective value linked with the Trial object.
     def tune(self):
@@ -199,16 +205,18 @@ class FindCCLogisticRegression():
     def objective(self, trial):
         C = trial.suggest_loguniform('C', 1e-5, 1e5)
         c = trial.suggest_loguniform('c', 1e-5, 1e5)
+        #print(c, C)
         try:
             if self.base_model=='equal':
                 model = EqualOpportunityClassifier(sensitive_cols="Sex", positive_target=True, covariance_threshold=c, C=C, max_iter=10**3)
             else:
                 model = DemographicParityClassifier(sensitive_cols="Sex", covariance_threshold=c, C=C, max_iter=10**3)
+            model.fit(self.X_train, self.y_train)
+            y_pred = model.predict(self.X_val)
         except:
             return float('inf')
 
-        model.fit(self.X_train, self.y_train)
-        y_pred = model.predict(self.X_val)
+
         
         if (sklearn.metrics.accuracy_score(self.y_val, y_pred)==0 or
             equal_opportunity_score(sensitive_column="Sex")(model, self.X_val, self.y_val)==0 or
@@ -229,7 +237,7 @@ class FindCCLogisticRegression():
             self.best_perf = perf
             self.best_model = model
         
-        error = 1-perf
+        error = 1/perf
 
         return error  # An objective value linked with the Trial object.
     def tune(self):
