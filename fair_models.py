@@ -13,6 +13,42 @@ from sklego.linear_model import DemographicParityClassifier
 from sklego.linear_model import EqualOpportunityClassifier
 from sklearn.linear_model import LogisticRegression
 import optuna
+import pandas as pd
+from scipy import stats
+import math
+
+#import DES techniques from DESlib
+from deslib.des.des_p import DESP
+from deslib.des.knora_u import KNORAU
+from deslib.des.knora_e import KNORAE
+from deslib.des.meta_des import METADES
+
+def calc_reweight(X, y):
+    W = {}
+    W[0] = {}
+    W[1] = {}
+
+    D = len(X)
+    len_men = X.groupby('Sex').count()['Age'][0]
+    len_women = X.groupby('Sex').count()['Age'][1]
+    len_neg = sum(y==-1)
+    len_pos = sum(y==1)
+    len_men_pos = len(X[(X.Sex == 0) & (y == 1)])
+    len_men_neg = len(X[(X.Sex == 0) & (y == -1)])
+    len_women_pos = len(X[(X.Sex == 1) & (y == 1)])
+    len_women_neg = len(X[(X.Sex == 1) & (y == -1)])
+
+    W[0][1] = (len_men*len_pos)/(D*len_men_pos)
+    W[0][-1] = (len_men*len_neg)/(D*len_men_neg)
+
+    W[1][1] = (len_women*len_pos)/(D*len_women_pos)
+    W[1][-1] = (len_women*len_neg)/(D*len_women_neg)
+    
+    sample_weight = []
+    for i in range(X.shape[0]):
+        sample_weight.append(W[X.iloc[i]['Sex']][y.iloc[i]])
+
+    return sample_weight
 
 def generalized_entropy_index(model, X, y_true, alpha=2, target=1):
     y_pred = model.predict(X)
@@ -29,6 +65,25 @@ def generalized_entropy_index(model, X, y_true, alpha=2, target=1):
 
 def coefficient_of_variation(model, X, y_true, target=1):
     return 2*(generalized_entropy_index(model, X, y_true, alpha=2, target=target)**0.5)
+
+class SimpleVoting():
+    def __init__(self, estimators, voting='hard'):
+        self.estimators = estimators
+        self.voting = voting
+        self.classes_ = estimators[0][1].classes_
+    
+    def predict(self, X):
+        if self.voting=='soft':
+            argmax = np.argmax(np.mean([m[1].predict_proba(X) for m in self.estimators],axis=0), axis=1)
+            y_pred = np.array([self.classes_[v] for v in argmax])
+        else:
+            y_pred = stats.mode([m[1].predict(X) for m in self.estimators],axis=0)[0][0]
+        
+        return y_pred
+    
+    def score(self, X, y):
+        y_pred = self.predict(X)
+        return sklearn.metrics.accuracy_score(y, y_pred)
 
 class FairScalarization(w_interface, single_interface, scalar_interface):
     def __init__(self, X, y, fair_feature):
@@ -100,15 +155,99 @@ class FairScalarization(w_interface, single_interface, scalar_interface):
         self.__objs[-1] = squared_norm(reg.coef_)
         self.__x = reg
         return self
+    
+class EqualScalarization(w_interface, single_interface, scalar_interface):
+    def __init__(self, X, y, fair_feature):
+        self.fair_feature = fair_feature
+        self.fair_att = sorted(X[fair_feature].unique())
+        self.__M = len(self.fair_att)+2
+        self.N = X.shape[0]
+        self.X = X.append(X)
+        self.y = y.append(pd.Series(np.ones(self.N)))
+
+    @property
+    def M(self):
+        return self.__M
+
+    @property
+    def feasible(self):
+        return True
+
+    @property
+    def optimum(self):
+        return True
+
+    @property
+    def objs(self):
+        return self.__objs
+
+    @property
+    def x(self):
+        return self.__x
+
+    @property
+    def w(self):
+        return self.__w
+
+    def optimize(self, w):
+        """Calculates the a multiobjective scalarization"""
+        if type(w) is int:
+            self.__w = np.zeros(self.M)
+            self.__w[w] = 1
+        elif type(w) is np.ndarray and w.ndim==1 and w.size==self.M:
+            self.__w = w
+        else:
+            raise('w is in the wrong format')
+        #print('w', self.__w)
+            
+        if self.__w[-1]==0:
+            lambd=10**-20
+        elif self.__w[-1]==1:
+            lambd=10**20
+        else:
+            lambd = self.__w[-1]/(1-self.__w[-1])
+        
+        loss_weight = self.__w[0]*(1+lambd)
+        equal_weight = self.__w[1:-1]*(1+lambd)
+        
+        sample_weight = self.X[self.fair_feature].replace({ff:fw for ff, fw in zip(self.fair_att,equal_weight)})
+        sample_weight[:self.N] = loss_weight
+        prec = np.mean(sample_weight)
+        
+        reg = LogisticRegression(multi_class='multinomial', solver='lbfgs',
+                                 penalty='l2', max_iter=10**4, tol=prec*10**-6, 
+                                 C=1/lambd).fit(self.X, self.y, sample_weight=sample_weight)
+        
+        y_pred = reg.predict_proba(self.X)
+        
+        self.__objs = np.zeros(self.M)
+        self.__objs[0] = log_loss(self.y[:self.N], y_pred[:self.N])*self.N
+        
+        for i, feat in enumerate(self.fair_att):
+            equal_weight = np.zeros(len(self.fair_att))
+            equal_weight[i] = 1
+            
+            sample_weight = self.X[self.fair_feature].replace({ff:fw for ff, fw in zip(self.fair_att,equal_weight)})
+            sample_weight[:self.N] = 0
+            
+            self.__objs[i] = log_loss(self.y, y_pred, sample_weight=sample_weight)*sum(self.X[self.fair_feature]==feat)/2
+        
+        self.__objs[-1] = squared_norm(reg.coef_)
+        self.__x = reg
+        #print('objs', self.__objs)
+        return self
 
 class MOOLogisticRegression():
-    def __init__(self, X_train, y_train, X_val, y_val, metric='accuracy'):
+    def __init__(self, X_train, y_train, X_val, y_val, scalarization, metric='accuracy', ensemble='voting'):
         self.X_train = X_train
         self.y_train = y_train
         self.X_val = X_val
         self.y_val = y_val
+        self.scalarization = scalarization
         self.metric = metric
+        self.ensemble = ensemble
         self.moo_ = None
+        self.solutions_ = None
 
     def tune(self, metric=None):
         self.best_perf = 0
@@ -117,7 +256,7 @@ class MOOLogisticRegression():
         if metric is not None:
             self.metric = metric
         if self.moo_ is None:
-            self.moo_ = monise(weightedScalar=FairScalarization(self.X_train, self.y_train, 'Sex'), singleScalar=FairScalarization(self.X_train, self.y_train, 'Sex'),
+            self.moo_ = monise(weightedScalar=self.scalarization, singleScalar=self.scalarization,
                           nodeTimeLimit=2, targetSize=150,
                           targetGap=0, nodeGap=0.01, norm=False)
             self.moo_.optimize()
@@ -143,6 +282,43 @@ class MOOLogisticRegression():
                 self.best_model = solution.x
 
         return self.best_model
+    def ensemble_model(self, ensemble=None):
+        if ensemble is not None:
+            self.ensemble = ensemble
+        if self.moo_ is None:
+            self.moo_ = monise(weightedScalar=self.scalarization, 
+                               singleScalar=self.scalarization,
+                              nodeTimeLimit=2, targetSize=150,
+                              targetGap=0, nodeGap=0.01, norm=False)
+            self.moo_.optimize()
+            self.solutions_ = []
+
+            for solution in self.moo_.solutionsList:
+                self.solutions_.append(solution.x)
+        if self.solutions_ is None:
+            self.solutions_ = []
+
+            for solution in self.moo_.solutionsList:
+                self.solutions_.append(solution.x)
+            
+        if self.ensemble == 'voting' or self.ensemble == 'voting hard':
+            models_t = []
+            for i in range(len(self.solutions_)):
+                models_t.append(("Model "+str(i),self.solutions_[i]))
+            ensemble_model = SimpleVoting(estimators=models_t)
+        if self.ensemble == 'voting soft':
+            models_t = []
+            for i in range(len(self.solutions_)):
+                models_t.append(("Model "+str(i),self.solutions_[i]))
+            ensemble_model = SimpleVoting(estimators=models_t, voting='soft')
+        if self.ensemble == 'knorau':
+            ensemble_model = KNORAU(self.solutions_)
+            ensemble_model.fit(self.X_val, self.y_val)
+        if self.ensemble == 'knorae':
+            ensemble_model = KNORAE(self.solutions_)
+            ensemble_model.fit(self.X_val, self.y_val)
+            
+        return ensemble_model
         
 class FindCLogisticRegression():
     def __init__(self, X_train, y_train, X_val, y_val, sample_weight=None, metric='accuracy'):
