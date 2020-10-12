@@ -23,30 +23,30 @@ from deslib.des.knora_u import KNORAU
 from deslib.des.knora_e import KNORAE
 from deslib.des.meta_des import METADES
 
-def calc_reweight(X, y):
+def calc_reweight(X, y, fair_feat):
     W = {}
     W[0] = {}
     W[1] = {}
 
     D = len(X)
-    len_men = X.groupby('Sex').count()['Age'][0]
-    len_women = X.groupby('Sex').count()['Age'][1]
+    len_g0 = X.groupby(fair_feat).count()[X.columns[0]][0]
+    len_g1 = X.groupby(fair_feat).count()[X.columns[0]][1]
     len_neg = sum(y==-1)
     len_pos = sum(y==1)
-    len_men_pos = len(X[(X.Sex == 0) & (y == 1)])
-    len_men_neg = len(X[(X.Sex == 0) & (y == -1)])
-    len_women_pos = len(X[(X.Sex == 1) & (y == 1)])
-    len_women_neg = len(X[(X.Sex == 1) & (y == -1)])
+    len_g0_pos = len(X[(X[fair_feat] == 0) & (y == 1)])
+    len_g0_neg = len(X[(X[fair_feat] == 0) & (y == -1)])
+    len_g1_pos = len(X[(X[fair_feat] == 1) & (y == 1)])
+    len_g1_neg = len(X[(X[fair_feat] == 1) & (y == -1)])
 
-    W[0][1] = (len_men*len_pos)/(D*len_men_pos)
-    W[0][-1] = (len_men*len_neg)/(D*len_men_neg)
+    W[0][1] = (len_g0*len_pos)/(D*len_g0_pos)
+    W[0][-1] = (len_g0*len_neg)/(D*len_g0_neg)
 
-    W[1][1] = (len_women*len_pos)/(D*len_women_pos)
-    W[1][-1] = (len_women*len_neg)/(D*len_women_neg)
+    W[1][1] = (len_g1*len_pos)/(D*len_g1_pos)
+    W[1][-1] = (len_g1*len_neg)/(D*len_g1_neg)
     
     sample_weight = []
     for i in range(X.shape[0]):
-        sample_weight.append(W[X.iloc[i]['Sex']][y.iloc[i]])
+        sample_weight.append(W[X.iloc[i][fair_feat]][y.iloc[i]])
 
     return sample_weight
 
@@ -86,9 +86,9 @@ class SimpleVoting():
         return sklearn.metrics.accuracy_score(y, y_pred)
 
 class FairScalarization(w_interface, single_interface, scalar_interface):
-    def __init__(self, X, y, fair_feature):
-        self.fair_feature = fair_feature
-        self.fair_att = sorted(X[fair_feature].unique())
+    def __init__(self, X, y, fair_feat):
+        self.fair_feat = fair_feat
+        self.fair_att = sorted(X[fair_feat].unique())
         self.__M = len(self.fair_att)+1
         self.X, self.y = X, y
 
@@ -135,8 +135,7 @@ class FairScalarization(w_interface, single_interface, scalar_interface):
             lambd = self.__w[-1]/(1-self.__w[-1])
         fair_weight = self.__w[:-1]*(1+lambd)
         
-        #sample_weight = self.X[self.fair_feature].replace({ff:fw for ff, fw in zip(self.fair_att,fair_weight)})
-        sample_weight = self.X[self.fair_feature].replace({ff:fw/sum(self.X[self.fair_feature]==ff) for ff, fw in zip(self.fair_att,fair_weight)})
+        sample_weight = self.X[self.fair_feat].replace({ff:fw/sum(self.X[self.fair_feat]==ff) for ff, fw in zip(self.fair_att,fair_weight)})
         prec = np.mean(sample_weight)
         reg = LogisticRegression(multi_class='multinomial', solver='lbfgs', class_weight=None,
                                  penalty='l2', max_iter=10**4, tol=prec*10**-6, 
@@ -148,8 +147,7 @@ class FairScalarization(w_interface, single_interface, scalar_interface):
         for i, feat in enumerate(self.fair_att):
             fair_weight = np.zeros(len(self.fair_att))
             fair_weight[i] = 1
-            sample_weight = self.X[self.fair_feature].replace({ff:fw for ff, fw in zip(self.fair_att,fair_weight)})
-            #self.__objs[i] = log_loss(self.y, y_pred, sample_weight=sample_weight)*sum(self.X[self.fair_feature]==feat)
+            sample_weight = self.X[self.fair_feat].replace({ff:fw for ff, fw in zip(self.fair_att,fair_weight)})
             self.__objs[i] = log_loss(self.y, y_pred, sample_weight=sample_weight)
         
         self.__objs[-1] = squared_norm(reg.coef_)
@@ -157,9 +155,9 @@ class FairScalarization(w_interface, single_interface, scalar_interface):
         return self
     
 class EqualScalarization(w_interface, single_interface, scalar_interface):
-    def __init__(self, X, y, fair_feature):
-        self.fair_feature = fair_feature
-        self.fair_att = sorted(X[fair_feature].unique())
+    def __init__(self, X, y, fair_feat):
+        self.fair_feat = fair_feat
+        self.fair_att = sorted(X[fair_feat].unique())
         self.__M = len(self.fair_att)+2
         self.N = X.shape[0]
         self.X = X.append(X)
@@ -210,7 +208,7 @@ class EqualScalarization(w_interface, single_interface, scalar_interface):
         loss_weight = self.__w[0]*(1+lambd)
         equal_weight = self.__w[1:-1]*(1+lambd)
         
-        sample_weight = self.X[self.fair_feature].replace({ff:fw for ff, fw in zip(self.fair_att,equal_weight)})
+        sample_weight = self.X[self.fair_feat].replace({ff:fw for ff, fw in zip(self.fair_att,equal_weight)})
         sample_weight[:self.N] = loss_weight
         prec = np.mean(sample_weight)
         
@@ -227,10 +225,10 @@ class EqualScalarization(w_interface, single_interface, scalar_interface):
             equal_weight = np.zeros(len(self.fair_att))
             equal_weight[i] = 1
             
-            sample_weight = self.X[self.fair_feature].replace({ff:fw for ff, fw in zip(self.fair_att,equal_weight)})
+            sample_weight = self.X[self.fair_feat].replace({ff:fw for ff, fw in zip(self.fair_att,equal_weight)})
             sample_weight[:self.N] = 0
             
-            self.__objs[i] = log_loss(self.y, y_pred, sample_weight=sample_weight)*sum(self.X[self.fair_feature]==feat)/2
+            self.__objs[i] = log_loss(self.y, y_pred, sample_weight=sample_weight)*sum(self.X[self.fair_feat]==feat)/2
         
         self.__objs[-1] = squared_norm(reg.coef_)
         self.__x = reg
@@ -238,11 +236,12 @@ class EqualScalarization(w_interface, single_interface, scalar_interface):
         return self
 
 class MOOLogisticRegression():
-    def __init__(self, X_train, y_train, X_val, y_val, scalarization, metric='accuracy', ensemble='voting'):
+    def __init__(self, X_train, y_train, X_val, y_val, fair_feat, scalarization, metric='accuracy', ensemble='voting'):
         self.X_train = X_train
         self.y_train = y_train
         self.X_val = X_val
         self.y_val = y_val
+        self.fair_feat = fair_feat
         self.scalarization = scalarization
         self.metric = metric
         self.ensemble = ensemble
@@ -264,16 +263,16 @@ class MOOLogisticRegression():
             y_pred = solution.x.predict(self.X_val)
             
             if (sklearn.metrics.accuracy_score(self.y_val, y_pred)==0 or
-                equal_opportunity_score(sensitive_column="Sex")(solution.x, self.X_val, self.y_val)==0 or
-                p_percent_score(sensitive_column="Sex")(solution.x, self.X_val))==0:
+                equal_opportunity_score(sensitive_column=self.fair_feat)(solution.x, self.X_val, self.y_val)==0 or
+                p_percent_score(sensitive_column=self.fair_feat)(solution.x, self.X_val))==0:
                 continue
             
             if self.metric=='accuracy':
                 perf = sklearn.metrics.accuracy_score(self.y_val, y_pred)
             elif self.metric=='equal_opportunity':
-                perf = equal_opportunity_score(sensitive_column="Sex")(solution.x, self.X_val, self.y_val)
+                perf = equal_opportunity_score(sensitive_column=self.fair_feat)(solution.x, self.X_val, self.y_val)
             elif self.metric=='p_percent':
-                perf = p_percent_score(sensitive_column="Sex")(solution.x, self.X_val)
+                perf = p_percent_score(sensitive_column=self.fair_feat)(solution.x, self.X_val)
             elif self.metric=='c_variation':
                 perf = 1/coefficient_of_variation(solution.x, self.X_val, self.y_val)
             
@@ -321,11 +320,12 @@ class MOOLogisticRegression():
         return ensemble_model
         
 class FindCLogisticRegression():
-    def __init__(self, X_train, y_train, X_val, y_val, sample_weight=None, metric='accuracy'):
+    def __init__(self, X_train, y_train, X_val, y_val, fair_feat, sample_weight=None, metric='accuracy'):
         self.X_train = X_train
         self.y_train = y_train
         self.X_val = X_val
         self.y_val = y_val
+        self.fair_feat = fair_feat
         self.best_perf = 0
         self.best_model = None
         self.sample_weight = sample_weight
@@ -339,16 +339,16 @@ class FindCLogisticRegression():
         y_pred = model.predict(self.X_val)
 
         if (sklearn.metrics.accuracy_score(self.y_val, y_pred)==0 or
-            equal_opportunity_score(sensitive_column="Sex")(model, self.X_val, self.y_val)==0 or
-            p_percent_score(sensitive_column="Sex")(model, self.X_val))==0:
+            equal_opportunity_score(sensitive_column=self.fair_feat)(model, self.X_val, self.y_val)==0 or
+            p_percent_score(sensitive_column=self.fair_feat)(model, self.X_val))==0:
             return float('inf')
         
         if self.metric=='accuracy':
             perf = sklearn.metrics.accuracy_score(self.y_val, y_pred)
         elif self.metric=='equal_opportunity':
-            perf = equal_opportunity_score(sensitive_column="Sex")(model, self.X_val, self.y_val)
+            perf = equal_opportunity_score(sensitive_column=self.fair_feat)(model, self.X_val, self.y_val)
         elif self.metric=='p_percent':
-            perf = p_percent_score(sensitive_column="Sex")(model, self.X_val)
+            perf = p_percent_score(sensitive_column=self.fair_feat)(model, self.X_val)
         elif self.metric=='c_variation':
             perf = 1/coefficient_of_variation(model, self.X_val, self.y_val)
         
@@ -367,11 +367,12 @@ class FindCLogisticRegression():
         return self.best_model
     
 class FindCCLogisticRegression():
-    def __init__(self, X_train, y_train, X_val, y_val, sample_weight=None, metric='accuracy', base_model='demografic'):
+    def __init__(self, X_train, y_train, X_val, y_val, fair_feat, sample_weight=None, metric='accuracy', base_model='demografic'):
         self.X_train = X_train
         self.y_train = y_train
         self.X_val = X_val
         self.y_val = y_val
+        self.fair_feat = fair_feat
         self.best_perf = 0
         self.best_model = None
         self.sample_weight = sample_weight
@@ -384,9 +385,9 @@ class FindCCLogisticRegression():
         #print(c, C)
         try:
             if self.base_model=='equal':
-                model = EqualOpportunityClassifier(sensitive_cols="Sex", positive_target=True, covariance_threshold=c, C=C, max_iter=10**3)
+                model = EqualOpportunityClassifier(sensitive_cols=self.fair_feat, positive_target=True, covariance_threshold=c, C=C, max_iter=10**3)
             else:
-                model = DemographicParityClassifier(sensitive_cols="Sex", covariance_threshold=c, C=C, max_iter=10**3)
+                model = DemographicParityClassifier(sensitive_cols=self.fair_feat, covariance_threshold=c, C=C, max_iter=10**3)
             model.fit(self.X_train, self.y_train)
             y_pred = model.predict(self.X_val)
         except:
@@ -395,17 +396,17 @@ class FindCCLogisticRegression():
 
         
         if (sklearn.metrics.accuracy_score(self.y_val, y_pred)==0 or
-            equal_opportunity_score(sensitive_column="Sex")(model, self.X_val, self.y_val)==0 or
-            p_percent_score(sensitive_column="Sex")(model, self.X_val))==0:
+            equal_opportunity_score(sensitive_column=self.fair_feat)(model, self.X_val, self.y_val)==0 or
+            p_percent_score(sensitive_column=self.fair_feat)(model, self.X_val))==0:
             return float('inf')
 
         
         if self.metric=='accuracy':
             perf = sklearn.metrics.accuracy_score(self.y_val, y_pred)
         elif self.metric=='equal_opportunity':
-            perf = equal_opportunity_score(sensitive_column="Sex")(model, self.X_val, self.y_val)
+            perf = equal_opportunity_score(sensitive_column=self.fair_feat)(model, self.X_val, self.y_val)
         elif self.metric=='p_percent':
-            perf = p_percent_score(sensitive_column="Sex")(model, self.X_val)
+            perf = p_percent_score(sensitive_column=self.fair_feat)(model, self.X_val)
         elif self.metric=='c_variation':
             perf = 1/coefficient_of_variation(model, self.X_val, self.y_val)
         
