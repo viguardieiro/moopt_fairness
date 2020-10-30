@@ -17,6 +17,10 @@ import pandas as pd
 from scipy import stats
 import math
 
+import sys
+sys.path.append("./MMFP/")
+from MMPF.MinimaxParetoFair.MMPF_trainer import SKLearn_Weighted_LLR, APSTAR
+
 #import DES techniques from DESlib
 from deslib.des.des_p import DESP
 from deslib.des.knora_u import KNORAU
@@ -386,9 +390,32 @@ class FindCCLogisticRegression():
         try:
             if self.base_model=='equal':
                 model = EqualOpportunityClassifier(sensitive_cols=self.fair_feat, positive_target=True, covariance_threshold=c, C=C, max_iter=10**3)
+                model.fit(self.X_train, self.y_train)
             else:
                 model = DemographicParityClassifier(sensitive_cols=self.fair_feat, covariance_threshold=c, C=C, max_iter=10**3)
-            model.fit(self.X_train, self.y_train)
+                model.fit(self.X_train, self.y_train)
+            
+            if self.base_model=='minimax':
+                a_train = self.X_train[self.fair_feat].copy()
+                a_val = self.X_val[self.fair_feat].copy()
+
+                a_train[a_train==0] = -1
+                a_val[a_val==0] = -1
+
+                model = SKLearn_Weighted_LLR(self.X_train.values, self.y_train.values,
+                             a_train.values, self.X_val.values,
+                             self.y_val.values, a_val.values,
+                             C_reg=C)
+
+                mua_ini = np.ones(a_val.max() + 1)
+                mua_ini /= mua_ini.sum()
+                results = APSTAR(model, mua_ini, niter=200, max_patience=200, Kini=1,
+                                      Kmin=20, alpha=0.5, verbose=False)
+                mu_best_list = results['mu_best_list']
+
+                mu_best = mu_best_list[-1]
+                model.weighted_fit(self.X_train.values, self.y_train.values, a_train.values, mu_best)
+                
             y_pred = model.predict(self.X_val)
         except:
             return float('inf')
