@@ -387,17 +387,17 @@ class FindCCLogisticRegression():
         C = trial.suggest_loguniform('C', 1e-5, 1e5)
         c = trial.suggest_loguniform('c', 1e-5, 1e5)
         #print(c, C)
-        try:
+        #try:
+        if 1==1:
             if self.base_model=='equal':
                 model = EqualOpportunityClassifier(sensitive_cols=self.fair_feat, positive_target=True, covariance_threshold=c, C=C, max_iter=10**3)
                 model.fit(self.X_train, self.y_train)
-            else:
+            elif self.base_model=='demographic':
                 model = DemographicParityClassifier(sensitive_cols=self.fair_feat, covariance_threshold=c, C=C, max_iter=10**3)
                 model.fit(self.X_train, self.y_train)
-            
-            if self.base_model=='minimax':
-                a_train = self.X_train[self.fair_feat].copy()
-                a_val = self.X_val[self.fair_feat].copy()
+            elif self.base_model=='minimax':
+                a_train = self.X_train[self.fair_feat].copy().astype('int')
+                a_val = self.X_val[self.fair_feat].copy().astype('int')
 
                 a_train[a_train==0] = -1
                 a_val[a_val==0] = -1
@@ -415,10 +415,12 @@ class FindCCLogisticRegression():
 
                 mu_best = mu_best_list[-1]
                 model.weighted_fit(self.X_train.values, self.y_train.values, a_train.values, mu_best)
+            else:
+                raise('Incorrect base_model.')
                 
             y_pred = model.predict(self.X_val)
-        except:
-            return float('inf')
+        #except:
+        #    return float('inf')
 
 
         
@@ -441,7 +443,10 @@ class FindCCLogisticRegression():
             self.best_perf = perf
             self.best_model = model
         
-        error = 1/perf
+        if perf!=0:
+            error = 1/perf
+        else:
+            error = float('inf')
 
         return error  # An objective value linked with the Trial object.
     def tune(self):
