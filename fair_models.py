@@ -360,7 +360,10 @@ class FindCLogisticRegression():
             self.best_perf = perf
             self.best_model = model
 
-        error = 1/perf
+        if perf!=0:
+            error = 1/perf
+        else:
+            error = float('inf')
 
         return error  # An objective value linked with the Trial object.
     def tune(self):
@@ -387,8 +390,8 @@ class FindCCLogisticRegression():
         C = trial.suggest_loguniform('C', 1e-5, 1e5)
         c = trial.suggest_loguniform('c', 1e-5, 1e5)
         #print(c, C)
-        #try:
-        if 1==1:
+        try:
+        #if 1==1:
             if self.base_model=='equal':
                 model = EqualOpportunityClassifier(sensitive_cols=self.fair_feat, positive_target=True, covariance_threshold=c, C=C, max_iter=10**3)
                 model.fit(self.X_train, self.y_train)
@@ -419,8 +422,8 @@ class FindCCLogisticRegression():
                 raise('Incorrect base_model.')
                 
             y_pred = model.predict(self.X_val)
-        #except:
-        #    return float('inf')
+        except:
+            return float('inf')
 
 
         
