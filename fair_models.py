@@ -214,6 +214,7 @@ class EqualScalarization(w_interface, single_interface, scalar_interface):
         
         sample_weight = self.X[self.fair_feat].replace({ff:fw for ff, fw in zip(self.fair_att,equal_weight)})
         sample_weight[:self.N] = loss_weight
+        self.sample_weight = sample_weight
         prec = np.mean(sample_weight)
         
         reg = LogisticRegression(multi_class='multinomial', solver='lbfgs',
@@ -232,7 +233,7 @@ class EqualScalarization(w_interface, single_interface, scalar_interface):
             sample_weight = self.X[self.fair_feat].replace({ff:fw for ff, fw in zip(self.fair_att,equal_weight)})
             sample_weight[:self.N] = 0
             
-            self.__objs[i] = log_loss(self.y, y_pred, sample_weight=sample_weight)*sum(self.X[self.fair_feat]==feat)/2
+            self.__objs[i+1] = log_loss(self.y, y_pred, sample_weight=sample_weight)*sum(self.X[self.fair_feat]==feat)/2
         
         self.__objs[-1] = squared_norm(reg.coef_)
         self.__x = reg
