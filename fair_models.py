@@ -2,7 +2,6 @@ from sklearn.metrics import log_loss
 from sklearn.utils.extmath import squared_norm
 from moopt.scalarization_interface import scalar_interface, single_interface, w_interface
 from moopt import monise
-from sklearn.linear_model import LogisticRegression
 import numpy as np
 import sklearn
 from sklego.metrics import equal_opportunity_score
@@ -71,10 +70,13 @@ def coefficient_of_variation(model, X, y_true, target=1):
     return 2*(generalized_entropy_index(model, X, y_true, alpha=2, target=target)**0.5)
 
 class SimpleVoting():
-    def __init__(self, estimators, voting='hard'):
+    def __init__(self, estimators, voting='hard', minimax=False):
         self.estimators = estimators
         self.voting = voting
-        self.classes_ = estimators[0][1].classes_
+        if minimax:
+            self.classes_ = estimators[0][1].model.classes_
+        else:
+            self.classes_ = estimators[0][1].classes_
     
     def predict(self, X):
         if self.voting=='soft':
