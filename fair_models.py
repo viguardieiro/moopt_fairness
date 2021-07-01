@@ -27,10 +27,7 @@ from deslib.des.knora_e import KNORAE
 from deslib.des.meta_des import METADES
 
 def calc_reweight(X, y, fair_feat):
-    W = {}
-    W[0] = {}
-    W[1] = {}
-
+    W = {0: {}, 1: {}}
     D = len(X)
     len_g0 = X.groupby(fair_feat).count()[X.columns[0]][0]
     len_g1 = X.groupby(fair_feat).count()[X.columns[0]][1]
@@ -46,12 +43,8 @@ def calc_reweight(X, y, fair_feat):
 
     W[1][1] = (len_g1*len_pos)/(D*len_g1_pos)
     W[1][-1] = (len_g1*len_neg)/(D*len_g1_neg)
-    
-    sample_weight = []
-    for i in range(X.shape[0]):
-        sample_weight.append(W[X.iloc[i][fair_feat]][y.iloc[i]])
 
-    return sample_weight
+    return [W[X.iloc[i][fair_feat]][y.iloc[i]] for i in range(X.shape[0])]
 
 def generalized_entropy_index(model, X, y_true, alpha=2, target=1):
     y_pred = model.predict(X)
@@ -79,13 +72,11 @@ class SimpleVoting():
             self.classes_ = estimators[0][1].classes_
     
     def predict(self, X):
-        if self.voting=='soft':
-            argmax = np.argmax(np.mean([m[1].predict_proba(X) for m in self.estimators],axis=0), axis=1)
-            y_pred = np.array([self.classes_[v] for v in argmax])
-        else:
-            y_pred = stats.mode([m[1].predict(X) for m in self.estimators],axis=0)[0][0]
-        
-        return y_pred
+        if self.voting != 'soft':
+            return stats.mode([m[1].predict(X) for m in self.estimators],axis=0)[0][0]
+
+        argmax = np.argmax(np.mean([m[1].predict_proba(X) for m in self.estimators],axis=0), axis=1)
+        return np.array([self.classes_[v] for v in argmax])
     
     def score(self, X, y):
         y_pred = self.predict(X)
@@ -132,7 +123,7 @@ class FairScalarization(w_interface, single_interface, scalar_interface):
         else:
             raise('w is in the wrong format')
         #print('w', self.__w)
-            
+
         if self.__w[-1]==0:
             lambd=10**-20
         elif self.__w[-1]==1:
@@ -306,16 +297,20 @@ class MOOLogisticRegression():
 
             for solution in self.moo_.solutionsList:
                 self.solutions_.append(solution.x)
-            
-        if self.ensemble == 'voting' or self.ensemble == 'voting hard':
-            models_t = []
-            for i in range(len(self.solutions_)):
-                models_t.append(("Model "+str(i),self.solutions_[i]))
+
+        if self.ensemble in ['voting', 'voting hard']:
+            models_t = [
+                ("Model " + str(i), self.solutions_[i])
+                for i in range(len(self.solutions_))
+            ]
+
             ensemble_model = SimpleVoting(estimators=models_t)
         if self.ensemble == 'voting soft':
-            models_t = []
-            for i in range(len(self.solutions_)):
-                models_t.append(("Model "+str(i),self.solutions_[i]))
+            models_t = [
+                ("Model " + str(i), self.solutions_[i])
+                for i in range(len(self.solutions_))
+            ]
+
             ensemble_model = SimpleVoting(estimators=models_t, voting='soft')
         if self.ensemble == 'knorau':
             ensemble_model = KNORAU(self.solutions_)
@@ -323,7 +318,7 @@ class MOOLogisticRegression():
         if self.ensemble == 'knorae':
             ensemble_model = KNORAE(self.solutions_)
             ensemble_model.fit(self.X_val, self.y_val)
-            
+
         return ensemble_model
         
 class FindCLogisticRegression():
@@ -349,7 +344,7 @@ class FindCLogisticRegression():
             equal_opportunity_score(sensitive_column=self.fair_feat)(model, self.X_val, self.y_val)==0 or
             p_percent_score(sensitive_column=self.fair_feat)(model, self.X_val))==0:
             return float('inf')
-        
+
         if self.metric=='accuracy':
             perf = sklearn.metrics.accuracy_score(self.y_val, y_pred)
         elif self.metric=='equal_opportunity':
@@ -358,17 +353,12 @@ class FindCLogisticRegression():
             perf = p_percent_score(sensitive_column=self.fair_feat)(model, self.X_val)
         elif self.metric=='c_variation':
             perf = 1/coefficient_of_variation(model, self.X_val, self.y_val)
-        
+
         if perf>self.best_perf:
             self.best_perf = perf
             self.best_model = model
 
-        if perf!=0:
-            error = 1/perf
-        else:
-            error = float('inf')
-
-        return error  # An objective value linked with the Trial object.
+        return 1/perf if perf!=0 else float('inf')
     def tune(self):
         optuna.logging.set_verbosity(optuna.logging.CRITICAL)
         study = optuna.create_study()  # Create a new study.
@@ -423,19 +413,19 @@ class FindCCLogisticRegression():
                 model.weighted_fit(self.X_train.values, self.y_train.values, a_train.values, mu_best)
             else:
                 raise('Incorrect base_model.')
-                
+
             y_pred = model.predict(self.X_val)
         except:
             return float('inf')
 
 
-        
+
         if (sklearn.metrics.accuracy_score(self.y_val, y_pred)==0 or
             equal_opportunity_score(sensitive_column=self.fair_feat)(model, self.X_val, self.y_val)==0 or
             p_percent_score(sensitive_column=self.fair_feat)(model, self.X_val))==0:
             return float('inf')
 
-        
+
         if self.metric=='accuracy':
             perf = sklearn.metrics.accuracy_score(self.y_val, y_pred)
         elif self.metric=='equal_opportunity':
@@ -444,17 +434,12 @@ class FindCCLogisticRegression():
             perf = p_percent_score(sensitive_column=self.fair_feat)(model, self.X_val)
         elif self.metric=='c_variation':
             perf = 1/coefficient_of_variation(model, self.X_val, self.y_val)
-        
+
         if perf>self.best_perf:
             self.best_perf = perf
             self.best_model = model
-        
-        if perf!=0:
-            error = 1/perf
-        else:
-            error = float('inf')
 
-        return error  # An objective value linked with the Trial object.
+        return 1/perf if perf!=0 else float('inf')
     def tune(self):
         optuna.logging.set_verbosity(optuna.logging.CRITICAL)
         study = optuna.create_study()  # Create a new study.
