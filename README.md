@@ -9,4 +9,10 @@ Os modelos implementados nesse projeto utilizam da abordagem [MONISE - Many Obje
 python setup.py install 
 ```
 
+Caso tenha algum problema com o PuLP, instale a versão 2.1:
+
+```
+pip install -Iv PuLP==2.1
+```
+
 Nos experimentos são feitas comparações com diversos modelos, dentre eles o [Minimax Pareto Fairness](http://proceedings.mlr.press/v119/martinez20a.html). Para isso, clone o seguinte repositório no diretório deste projeto: https://github.com/natalialmg/MMPF
