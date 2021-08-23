@@ -29,8 +29,8 @@ from deslib.des.meta_des import METADES
 def calc_reweight(X, y, fair_feat):
     W = {0: {}, 1: {}}
     D = len(X)
-    len_g0 = X.groupby(fair_feat).count()[X.columns[0]][0]
-    len_g1 = X.groupby(fair_feat).count()[X.columns[0]][1]
+    len_g0 = X.groupby(fair_feat).size()[0]
+    len_g1 = X.groupby(fair_feat).size()[1]
     len_neg = sum(y==-1)
     len_pos = sum(y==1)
     len_g0_pos = len(X[(X[fair_feat] == 0) & (y == 1)])
