@@ -25,8 +25,6 @@ from fair_models import calc_reweight
 from fair_models import FairScalarization, EqualScalarization
 from fair_models import SimpleVoting
 
-import plotly
-import plotly.graph_objects as go
 import matplotlib.pyplot as plt
 
 import sys
@@ -206,29 +204,21 @@ def evaluate_all_approaches(fair_feature, X_train, y_train, X_val, y_val, X_test
 
     return pd.DataFrame(models_metrics).set_index('Approach')
 
-def kfold_methods(dataset, fair_feature, pred_feature, n_folds = 5):
-    kfold = KFold(n_folds, True, 1)
-
+def kfold_methods(X, y, fair_feature, n_folds = 5):
     results_test = pd.DataFrame()
 
-    for _ in range(n_folds):    
-        result = next(kfold.split(dataset), None)
+    kf = KFold(n_splits=n_folds)
+    kf.get_n_splits(X)
 
-        train = dataset.iloc[result[0]].drop("Unnamed: 0", axis=1)
-        test = dataset.iloc[result[1]].drop("Unnamed: 0", axis=1)
+    idx_fold = 0
+    for train_index, tv_index in kf.split(X):
+        idx_fold += 1
+        print(f"  [INFO] Starting Fold {idx_fold}...")
 
-        categories_fair_class = []
-        for index, row in train.iterrows():
-            if row[pred_feature] == -1:
-                categories_fair_class.append(row[fair_feature])
-            else:
-                categories_fair_class.append(row[fair_feature]+2)
-
-        X = train.drop([pred_feature], axis=1)
-        y = train[pred_feature]
-        X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=int(X.shape[0]*0.2), stratify=categories_fair_class)
-        X_test = test.drop([pred_feature], axis=1)
-        y_test = test[pred_feature]
+        X_train, y_train = X.iloc[train_index], y.iloc[train_index]
+        X_tv, y_tv = X.iloc[tv_index], y.iloc[tv_index]
+        X_test, X_val, y_test, y_val = train_test_split(X_tv, y_tv, test_size=0.5, 
+                                        stratify=X_tv[fair_feature], random_state=1)
 
         eval_result = evaluate_all_approaches(fair_feature, X_train, y_train, X_val, y_val, X_test, y_test)
 
