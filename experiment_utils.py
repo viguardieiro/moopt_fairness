@@ -1,31 +1,25 @@
 import pandas as pd
-import math
-import random
 import numpy as np
 
-from sklearn import preprocessing
 from sklearn.model_selection import train_test_split
 from sklearn.linear_model import LogisticRegression
 from sklego.metrics import equal_opportunity_score
 from sklego.metrics import p_percent_score
-from sklearn.metrics import log_loss, accuracy_score
-from sklearn.utils.extmath import squared_norm
+from sklearn.metrics import accuracy_score
 from sklearn.model_selection import KFold
-import optuna, sklearn, sklearn.datasets
 
 from sklego.linear_model import DemographicParityClassifier
 from sklego.linear_model import EqualOpportunityClassifier
 from sklearn.linear_model import LogisticRegression
 
-from moopt.scalarization_interface import scalar_interface, single_interface, w_interface
 from moopt import monise
 
-from fair_models import coefficient_of_variation, MOOLogisticRegression, FindCLogisticRegression, FindCCLogisticRegression
+from fair_models import coefficient_of_variation
 from fair_models import calc_reweight
 from fair_models import FairScalarization, EqualScalarization
 from fair_models import SimpleVoting
 
-import matplotlib.pyplot as plt
+from model_aggregation import ensemble_filter
 
 import sys
 sys.path.append("./MMFP/")
@@ -128,26 +122,11 @@ def evaluate_mooerr(fair_feature, X_train, y_train, X_val, y_val, X_test, y_test
 
     mooerr_df = pd.DataFrame(mooerr_values)
 
-    mooerr_metrics = None
+    mooerr_metrics = ensemble_filter(mooerr_df, mooerr_sols, fair_feature, 
+                                    X_test, y_test, n_acc = 150, nds = True, with_acc=True)
 
-    for metric in ['DP', 'EO', 'CV']:
-        ## Filter the 20 best models in Acc, then the 10 best in metric
-        if metric == 'CV':
-            index_list = list(mooerr_df.nlargest(20,'Acc').nsmallest(10,metric).index)
-        else:
-            index_list = list(mooerr_df.nlargest(20,'Acc').nlargest(10,metric).index)
-        mooerr_filtered_models = [("Model "+str(i), mooerr_sols[i]) for i in index_list]
-
-        ## Generate ensemble
-        ensemble_moo_err = SimpleVoting(estimators=mooerr_filtered_models, voting='soft', minimax=False)
-
-        # Evaluate
-        mooerr_metric = evaluate_model_test(ensemble_moo_err, fair_feature, X_test, y_test)
-        mooerr_metric['Approach'] = 'MOOErr - '+metric
-        if mooerr_metrics is None:
-            mooerr_metrics = [mooerr_metric]
-        else:
-            mooerr_metrics.extend([mooerr_metric])
+    mooerr_metrics['Approach'] = 'MooErr'
+    del mooerr_metrics['Filter']
 
     return mooerr_metrics
 
@@ -170,26 +149,11 @@ def evaluate_mooacep(fair_feature, X_train, y_train, X_val, y_val, X_test, y_tes
 
     mooacep_df = pd.DataFrame(mooacep_values_val)
 
-    mooacep_metrics = None
+    mooacep_metrics = ensemble_filter(mooacep_df, mooacep_sols, fair_feature, 
+                                    X_test, y_test, n_acc = 50, nds = True, with_acc=True)
 
-    for metric in ['DP', 'EO', 'CV']:
-        ## Filter the 20 best models in Acc, then the 10 best in metric
-        if metric == 'CV':
-            index_list = list(mooacep_df.nlargest(20,'Acc').nsmallest(10,metric).index)
-        else:
-            index_list = list(mooacep_df.nlargest(20,'Acc').nlargest(10,metric).index)
-        mooacep_filtered_models = [("Model "+str(i), mooacep_sols[i]) for i in index_list]
-
-        ## Generate ensemble
-        ensemble_mooacep = SimpleVoting(estimators=mooacep_filtered_models, voting='soft', minimax=False)
-
-        # Evaluate
-        mooacep_metric = evaluate_model_test(ensemble_mooacep, fair_feature, X_test, y_test)
-        mooacep_metric['Approach'] = 'MOOAcep - '+metric
-        if mooacep_metrics is None:
-            mooacep_metrics = [mooacep_metric]
-        else:
-            mooacep_metrics.extend([mooacep_metric])
+    mooacep_metrics['Approach'] = 'MooAcep'
+    del mooacep_metrics['Filter']
 
     return mooacep_metrics
 
@@ -198,9 +162,9 @@ def evaluate_all_approaches(fair_feature, X_train, y_train, X_val, y_val, X_test
                     evaluate_reweigh(fair_feature, X_train, y_train, X_test, y_test),
                     evaluate_dempar(fair_feature, X_train, y_train, X_test, y_test),
                     evaluate_eqop(fair_feature, X_train, y_train, X_test, y_test),
-                    evaluate_minimax(fair_feature, X_train, y_train, X_val, y_val, X_test, y_test)]
-    models_metrics.extend(evaluate_mooerr(fair_feature, X_train, y_train, X_val, y_val, X_test, y_test))
-    models_metrics.extend(evaluate_mooacep(fair_feature, X_train, y_train, X_val, y_val, X_test, y_test))
+                    evaluate_minimax(fair_feature, X_train, y_train, X_val, y_val, X_test, y_test),
+                    evaluate_mooerr(fair_feature, X_train, y_train, X_val, y_val, X_test, y_test),
+                    evaluate_mooacep(fair_feature, X_train, y_train, X_val, y_val, X_test, y_test)]
 
     return pd.DataFrame(models_metrics).set_index('Approach')
 
