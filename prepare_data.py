@@ -29,11 +29,12 @@ def get_data(dataset_used="adult", protected_attribute="sex", train_size=0.7):
     np.random.seed(1)
 
     # Split into train, validation, and test
-    dataset_orig_train, dataset_orig_vt = dataset_orig.split([train_size], shuffle=True)
+    dataset_orig_tvt, dataset_orig_ftest = dataset_orig.split([train_size], shuffle=True)
+    dataset_orig_train, dataset_orig_vt = dataset_orig_tvt.split([train_size], shuffle=True)
     dataset_orig_valid, dataset_orig_test = dataset_orig_vt.split([0.5], shuffle=True)
 
     # Convert to dataframe
-    df_all, _ = dataset_orig.convert_to_dataframe()
+    df_all, _ = dataset_orig_tvt.convert_to_dataframe()
     df_all = df_all.reset_index(drop=True)
     df_train, _ = dataset_orig_train.convert_to_dataframe()
     df_train = df_train.reset_index(drop=True)
@@ -41,6 +42,8 @@ def get_data(dataset_used="adult", protected_attribute="sex", train_size=0.7):
     df_valid = df_valid.reset_index(drop=True)
     df_test, _ = dataset_orig_test.convert_to_dataframe()
     df_test = df_test.reset_index(drop=True)
+    df_ftest, _ = dataset_orig_ftest.convert_to_dataframe()
+    df_ftest = df_ftest.reset_index(drop=True)
 
     X_all = df_all.drop(dataset_orig.label_names, axis=1)
     y_all = df_all[dataset_orig.label_names[0]]
@@ -50,6 +53,8 @@ def get_data(dataset_used="adult", protected_attribute="sex", train_size=0.7):
     y_valid = df_valid[dataset_orig.label_names[0]]
     X_test = df_test.drop(dataset_orig.label_names, axis=1)
     y_test = df_test[dataset_orig.label_names[0]]
+    X_ftest = df_ftest.drop(dataset_orig.label_names, axis=1)
+    y_ftest = df_ftest[dataset_orig.label_names[0]]
 
     # Mab labels to favorable=1 and unfavorable=-1
     favorable = dataset_orig.favorable_label
@@ -59,8 +64,9 @@ def get_data(dataset_used="adult", protected_attribute="sex", train_size=0.7):
     y_train = y_train.map(label_map)
     y_valid = y_valid.map(label_map)
     y_test = y_test.map(label_map)
+    y_ftest = y_ftest.map(label_map)
 
-    return X_all, y_all, X_train, y_train, X_valid, y_valid, X_test, y_test
+    return X_all, y_all, X_train, y_train, X_valid, y_valid, X_test, y_test, X_ftest, y_ftest
 
 if __name__ == "__main__":
     datasets = [["adult", "race"],
@@ -72,19 +78,21 @@ if __name__ == "__main__":
         Path("data/"+dataset+"_"+attribute).mkdir(parents=True, exist_ok=True)
 
         # get clean and splitted data
-        X_all, y_all, X_train, y_train, X_valid, y_valid, X_test, y_test = get_data(dataset, attribute)
+        X_all,y_all,X_train,y_train,X_valid,y_valid,X_test,y_test,X_ftest,y_ftest = get_data(dataset, attribute)
 
         # save features
         X_all.to_pickle("data/"+dataset+"_"+attribute+"/X.pickle")
         X_train.to_pickle("data/"+dataset+"_"+attribute+"/X_train.pickle")
         X_valid.to_pickle("data/"+dataset+"_"+attribute+"/X_valid.pickle")
         X_test.to_pickle("data/"+dataset+"_"+attribute+"/X_test.pickle")
+        X_ftest.to_pickle("data/"+dataset+"_"+attribute+"/X_ftest.pickle")
 
         # save labels
         pickle.dump(y_all, open("data/"+dataset+"_"+attribute+"/y.pickle", "wb"))
         pickle.dump(y_train, open("data/"+dataset+"_"+attribute+"/y_train.pickle", "wb"))
         pickle.dump(y_valid, open("data/"+dataset+"_"+attribute+"/y_valid.pickle", "wb"))
         pickle.dump(y_test, open("data/"+dataset+"_"+attribute+"/y_test.pickle", "wb"))
+        pickle.dump(y_ftest, open("data/"+dataset+"_"+attribute+"/y_ftest.pickle", "wb"))
 
         print("[INFO] "+dataset+"_"+attribute+" data obtained.")
 
