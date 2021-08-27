@@ -168,10 +168,10 @@ def evaluate_all_approaches(fair_feature, X_train, y_train, X_val, y_val, X_test
 
     return pd.DataFrame(models_metrics).set_index('Approach')
 
-def kfold_methods(X, y, fair_feature, n_folds = 5):
+def kfold_methods(X, y, X_test, y_test, fair_feature, n_folds = 5):
     results_test = pd.DataFrame()
 
-    kf = KFold(n_splits=n_folds)
+    kf = KFold(n_splits=n_folds, random_state=None, shuffle=False)
     kf.get_n_splits(X)
 
     idx_fold = 0
@@ -180,9 +180,7 @@ def kfold_methods(X, y, fair_feature, n_folds = 5):
         print(f"  [INFO] Starting Fold {idx_fold}...")
 
         X_train, y_train = X.iloc[train_index], y.iloc[train_index]
-        X_tv, y_tv = X.iloc[tv_index], y.iloc[tv_index]
-        X_test, X_val, y_test, y_val = train_test_split(X_tv, y_tv, test_size=0.5, 
-                                        stratify=X_tv[fair_feature], random_state=1)
+        X_val, y_val = X.iloc[tv_index], y.iloc[tv_index]
 
         eval_result = evaluate_all_approaches(fair_feature, X_train, y_train, X_val, y_val, X_test, y_test)
 
