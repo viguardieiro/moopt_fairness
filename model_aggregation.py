@@ -28,11 +28,13 @@ def nds_moo(models_df, n_selected = 10, with_acc = False):
             last_front = list(copy.copy(fronts[front]))
             
             nadir = np.max(metrics,axis=0)
-            nadir = nadir
             while len(last_front)>n_selected-len(selected_indexes):
                 hv = pg.hypervolume([list(s) for s in last_front])
-                idx_excl = hv.least_contributor(nadir)
-                del last_front[idx_excl]
+                try:
+                    idx_excl = hv.least_contributor(nadir)
+                    del last_front[idx_excl]
+                except:
+                    break
                 
             selected_indexes += [metrics.index(seq) for seq in last_front]
             
