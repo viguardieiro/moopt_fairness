@@ -2,8 +2,8 @@
 .vscode/
 __pycache__/
 MMPF/
+AdaFair/
 data/
-Data/
 *.png
 images/
 results/

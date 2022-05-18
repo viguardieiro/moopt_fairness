@@ -25,6 +25,8 @@ import sys
 sys.path.append("./MMFP/")
 from MMPF.MinimaxParetoFair.MMPF_trainer import SKLearn_Weighted_LLR, APSTAR
 
+from AdaFair.AdaFair import AdaFair
+
 def evaluate_model_test(model__, fair_feature, X_test, y_test):
     return {"Acc": accuracy_score(y_test, model__.predict(X_test)),
             "EO": equal_opportunity_score(sensitive_column=fair_feature)(model__, X_test, y_test),
@@ -102,6 +104,18 @@ def evaluate_minimax(fair_feature, X_train, y_train, X_val, y_val, X_test, y_tes
 
     return minimax_metrics
 
+def evaluate_adafair(fair_feature, X_train, y_train, X_test, y_test):
+    sa_index = list(X_train.columns).index(fair_feature)
+    # Train
+    adafair_model = AdaFair(n_estimators=500, saIndex=sa_index, saValue=0, c=1)
+    adafair_model.fit(X_train, y_train)
+
+    # Evaluate
+    adafair_model = evaluate_model_test(adafair_model, fair_feature, X_test, y_test)
+    adafair_model['Approach'] = 'AdaFair'
+
+    return adafair_model
+
 def evaluate_mooerr(fair_feature, X_train, y_train, X_val, y_val, X_test, y_test, metric='EO'):
     # Train
     ## Train 150 models
@@ -162,6 +176,7 @@ def evaluate_all_approaches(fair_feature, X_train, y_train, X_val, y_val, X_test
                     evaluate_reweigh(fair_feature, X_train, y_train, X_test, y_test),
                     evaluate_dempar(fair_feature, X_train, y_train, X_test, y_test),
                     evaluate_eqop(fair_feature, X_train, y_train, X_test, y_test),
+                    evaluate_adafair(fair_feature, X_train, y_train, X_test, y_test),
                     evaluate_minimax(fair_feature, X_train, y_train, X_val, y_val, X_test, y_test),
                     evaluate_mooerr(fair_feature, X_train, y_train, X_val, y_val, X_test, y_test),
                     evaluate_mooacep(fair_feature, X_train, y_train, X_val, y_val, X_test, y_test)]
