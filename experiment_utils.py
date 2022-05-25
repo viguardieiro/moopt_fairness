@@ -107,7 +107,7 @@ def evaluate_minimax(fair_feature, X_train, y_train, X_val, y_val, X_test, y_tes
 def evaluate_adafair(fair_feature, X_train, y_train, X_test, y_test):
     sa_index = list(X_train.columns).index(fair_feature)
     # Train
-    adafair_model = AdaFair(n_estimators=500, saIndex=sa_index, saValue=0, c=1)
+    adafair_model = AdaFair(n_estimators=300, saIndex=sa_index, saValue=0, c=1)
     adafair_model.fit(X_train, y_train)
 
     # Evaluate
@@ -121,7 +121,7 @@ def evaluate_mooerr(fair_feature, X_train, y_train, X_val, y_val, X_test, y_test
     ## Train 150 models
     moo_err = monise(weightedScalar=FairScalarization(X_train, y_train, fair_feature),
                     singleScalar=FairScalarization(X_train, y_train, fair_feature),
-                    nodeTimeLimit=2, targetSize=150,
+                    nodeTimeLimit=2, targetSize=300,
                     targetGap=0, nodeGap=0.05, norm=False)
 
     moo_err.optimize()
@@ -148,7 +148,7 @@ def evaluate_mooacep(fair_feature, X_train, y_train, X_val, y_val, X_test, y_tes
     # Train 150 models
     mooacep = monise(weightedScalar=EqualScalarization(X_train, y_train, fair_feature),
                 singleScalar=EqualScalarization(X_train, y_train, fair_feature),
-                nodeTimeLimit=2, targetSize=150,
+                nodeTimeLimit=2, targetSize=300,
                 targetGap=0, nodeGap=0.01, norm=False)
 
     mooacep.optimize()
@@ -164,7 +164,7 @@ def evaluate_mooacep(fair_feature, X_train, y_train, X_val, y_val, X_test, y_tes
     mooacep_df = pd.DataFrame(mooacep_values_val)
 
     mooacep_metrics = ensemble_filter(mooacep_df, mooacep_sols, fair_feature, 
-                                    X_test, y_test, n_acc = 50, nds = True, with_acc=True)
+                                    X_test, y_test, n_acc = 150, nds = True, with_acc=True)
 
     mooacep_metrics['Approach'] = 'MooAcep'
     del mooacep_metrics['Filter']
