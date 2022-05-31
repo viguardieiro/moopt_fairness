@@ -1,10 +1,12 @@
 .DS_Store
 .vscode/
+.ipynb_checkpoints/
 __pycache__/
 MMPF/
 AdaFair/
 MAMOfair/
 data/
 *.png
+*.log
 images/
 results/
