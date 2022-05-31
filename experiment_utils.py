@@ -29,7 +29,7 @@ from MMPF.MinimaxParetoFair.MMPF_trainer import SKLearn_Weighted_LLR, APSTAR
 # Functions for AdaFair
 from AdaFair.AdaFair import AdaFair
 
-# Functiona for MAMO-fair
+# Functions for MAMO-fair
 import glob
 import torch
 import torch.optim as optim
