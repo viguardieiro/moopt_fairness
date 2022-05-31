@@ -1,5 +1,7 @@
+import shutil
 import pandas as pd
 import numpy as np
+from IPython.display import clear_output
 
 from sklearn.model_selection import train_test_split
 from sklearn.linear_model import LogisticRegression
@@ -21,11 +23,24 @@ from fair_models import SimpleVoting
 
 from model_aggregation import ensemble_filter
 
-import sys
-sys.path.append("./MMFP/")
+# Functions to Minimax
 from MMPF.MinimaxParetoFair.MMPF_trainer import SKLearn_Weighted_LLR, APSTAR
 
+# Functions for AdaFair
 from AdaFair.AdaFair import AdaFair
+
+# Functiona for MAMO-fair
+import glob
+import torch
+import torch.optim as optim
+from MAMOfair.dataloader.fairness_datahandler import FairnessDataHandler
+from MAMOfair.dataloader.fairness_dataset import CustomDataset
+from MAMOfair.public_experiments.pareto_utils import *
+from MAMOfair.models.nn1 import NN1
+from MAMOfair.loss.losses import *
+from MAMOfair.metric.metrics import *
+from MAMOfair.trainer import Trainer
+from MAMOfair.validator import Validator
 
 def evaluate_model_test(model__, fair_feature, X_test, y_test):
     return {"Acc": accuracy_score(y_test, model__.predict(X_test)),
@@ -116,6 +131,118 @@ def evaluate_adafair(fair_feature, X_train, y_train, X_test, y_test):
 
     return adafair_model
 
+def evaluate_mamofair(fair_feature, X_train, y_train, X_val, y_val, X_test, y_test):
+    # Process data
+
+    def get_X_y(df, y_cols, keep_sen=True):
+        y_rev = y_cols.copy()
+        y_rev.reverse()
+        col_order = [col for col in df.columns if col not in y_cols] + y_rev
+        df = df[col_order]
+        y = df[y_cols].to_numpy()
+        if(keep_sen is True):
+            X = df.drop(y_cols[0], axis=1).to_numpy()
+        elif(keep_sen is False):
+            X = df.drop(y_cols, axis=1).to_numpy()
+        index = {}
+        for i, col in enumerate(y_cols):
+            index[col] = i
+        
+        return(X, y, index)
+
+    device = torch.device('cuda:0')
+
+    # Train data
+    y_train = y_train.values
+    y_train = (y_train+1)/2
+    X_train, y, _ = get_X_y(X_train, [fair_feature])
+    y_train = np.c_[y_train, y] 
+    X1 = torch.from_numpy(X_train).float().to(device)
+    y1 = torch.from_numpy(y_train).float().to(device)
+    train_data = CustomDataset(X1, y1)
+
+    input_dim = X1.shape[1]
+
+    # Val data
+    y_val = y_val.values
+    y_val = (y_val+1)/2
+    X_val, y, _ = get_X_y(X_val, [fair_feature])
+    y_val = np.c_[y_val, y] 
+    X1 = torch.from_numpy(X_val).float().to(device)
+    y1 = torch.from_numpy(y_val).float().to(device)
+    val_data = CustomDataset(X1, y1)
+
+    # Test data
+    y_test = y_test.values
+    y_test = (y_test+1)/2
+    X_test, y, _ = get_X_y(X_test, [fair_feature])
+    y_test = np.c_[y_test, y] 
+    X1 = torch.from_numpy(X_test).float().to(device)
+    y1 = torch.from_numpy(y_test).float().to(device)
+    test_data = CustomDataset(X1, y1)
+
+    accuracy = Accuracy(name='accuracy')
+    dp = DemParity(name='DP')
+    eo = EqOportunity(name='EO')
+    cv = CoVariation(name='CV')
+    
+    validation_metrics = [accuracy, eo, dp, cv]
+
+    data_handler = FairnessDataHandler('data', train_data, val_data, test_data)
+
+    # Build model
+    model = NN1(input_dimension=input_dim)
+    model.to(device)
+    model.apply(weights_init)
+    
+    optimizer = optim.Adam(model.parameters(), lr=1e-2)
+
+    performance_loss = BCELoss(name='bce')
+    loss_EOP = TPRLoss(name='EOP', reg_lambda=0.1, reg_type='tanh')
+    loss_DDP = DPLoss(name='DPP', reg_lambda=0.1, reg_type='tanh')
+
+    losses = [performance_loss, loss_DDP, loss_EOP]
+
+    save_to_path = 'MAMOfair/saved_models/model/'
+    shutil.rmtree(save_to_path, ignore_errors=True)
+
+    trainer = Trainer(data_handler, model, losses, validation_metrics, save_to_path,                      
+                            params='MAMOfair/yaml_files/trainer_params.yaml', optimizer=optimizer)
+
+    trainer.train()
+
+    scores_val = to_np(trainer.pareto_manager._pareto_front)
+    chosen_score_zenith, idx_zenith = get_solution(scores_val)
+
+    ####### closest to zenith point #############
+    model_val = NN1(input_dimension=input_dim)
+    model_val.to(device)
+
+    match_zenith = '_'.join(['%.4f']*len(chosen_score_zenith)) % tuple(chosen_score_zenith)
+    files = glob.glob(save_to_path + '*')
+    for f in files:
+        if(match_zenith in f):
+            model_val.load_state_dict(torch.load(f))
+            continue
+
+    shutil.rmtree(save_to_path, ignore_errors=True)
+
+
+    # Evaluate
+    test_len = data_handler.get_testdata_len()
+    test_loader = data_handler.get_test_dataloader(drop_last=False, batch_size=test_len)
+    test_validator = Validator(model_val, test_loader, validation_metrics, losses)
+    test_metrics, test_losses = test_validator.evaluate()
+
+    mamofair_model = {"Acc": test_metrics[0],
+                      "EO": test_metrics[1],
+                      "DP": test_metrics[2],
+                      "CV": test_metrics[3],
+                      "Approach": 'MAMOFair'
+    }
+
+    return mamofair_model
+
 def evaluate_mooerr(fair_feature, X_train, y_train, X_val, y_val, X_test, y_test, metric='EO'):
     # Train
     ## Train 150 models
@@ -141,6 +268,8 @@ def evaluate_mooerr(fair_feature, X_train, y_train, X_val, y_val, X_test, y_test
 
     mooerr_metrics['Approach'] = 'MooErr'
     del mooerr_metrics['Filter']
+
+    clear_output(wait=True)
 
     return mooerr_metrics
 
@@ -169,6 +298,8 @@ def evaluate_mooacep(fair_feature, X_train, y_train, X_val, y_val, X_test, y_tes
     mooacep_metrics['Approach'] = 'MooAcep'
     del mooacep_metrics['Filter']
 
+    clear_output(wait=True)
+
     return mooacep_metrics
 
 def evaluate_all_approaches(fair_feature, X_train, y_train, X_val, y_val, X_test, y_test):
@@ -178,6 +309,7 @@ def evaluate_all_approaches(fair_feature, X_train, y_train, X_val, y_val, X_test
                     evaluate_eqop(fair_feature, X_train, y_train, X_test, y_test),
                     evaluate_adafair(fair_feature, X_train, y_train, X_test, y_test),
                     evaluate_minimax(fair_feature, X_train, y_train, X_val, y_val, X_test, y_test),
+                    evaluate_mamofair(fair_feature, X_train, y_train, X_val, y_val, X_test, y_test),
                     evaluate_mooerr(fair_feature, X_train, y_train, X_val, y_val, X_test, y_test),
                     evaluate_mooacep(fair_feature, X_train, y_train, X_val, y_val, X_test, y_test)]
 

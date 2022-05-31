@@ -3,6 +3,7 @@
 __pycache__/
 MMPF/
 AdaFair/
+MAMOfair/
 data/
 *.png
 images/
