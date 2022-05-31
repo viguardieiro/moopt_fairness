@@ -49,9 +49,8 @@ def ensemble_from_filtered_models(filtered_models, fair_feature, X_test, y_test)
     metrics = experiment_utils.evaluate_model_test(ensemble_model, fair_feature, X_test, y_test)
     return metrics
 
-def simple_filter(models_df, n_acc, fair_metric, fair_filter):
+def simple_filter(models_df, n_acc, fair_metric, fair_filter, n_fair):
     if fair_filter:
-        n_fair = 10
         if fair_metric == 'CV':
             index_list = list(models_df.nlargest(n_acc,'Acc').nsmallest(n_fair,fair_metric).index)
         else:
@@ -60,19 +59,19 @@ def simple_filter(models_df, n_acc, fair_metric, fair_filter):
         index_list = list(models_df.nlargest(n_acc,'Acc').index)
     return index_list
 
-def nds_filter(models_df, n_acc, with_acc):
+def nds_filter(models_df, n_acc, with_acc, n_selected):
     models_acc = models_df.nlargest(n_acc,'Acc')
     if not with_acc:
         models_acc = models_acc.drop(['Acc'], axis=1)
-    index_list = nds_moo(models_acc, with_acc = with_acc)
+    index_list = nds_moo(models_acc, n_selected = n_selected, with_acc = with_acc)
     return index_list
 
 def ensemble_filter(models_df, models_sols, fair_feature, X_test, y_test, n_acc, fair_metric = 'DP', fair_filter = True,
-                    nds = False, with_acc = True):
+                    nds = False, with_acc = True, n_selected=10, n_fair=10):
     if nds:
-        index_list = nds_filter(models_df, n_acc, with_acc)
+        index_list = nds_filter(models_df, n_acc, with_acc, n_selected)
     else:
-        index_list = simple_filter(models_df, n_acc, fair_metric, fair_filter)
+        index_list = simple_filter(models_df, n_acc, fair_metric, fair_filter, n_fair)
     
     filtered_models = [("Model "+str(i), models_sols[i]) for i in index_list]
     metrics = ensemble_from_filtered_models(filtered_models, fair_feature, X_test, y_test)
@@ -83,7 +82,9 @@ def ensemble_filter(models_df, models_sols, fair_feature, X_test, y_test, n_acc,
         else:
             metrics['Filter'] = str(n_acc)+'Acc+NDS(wAcc)' if with_acc else str(n_acc)+'Acc+NDS'
     else:
-        if fair_filter:
+        if n_acc==1:
+            metrics['Filter'] = 'BestAcc'
+        elif fair_filter:
             metrics['Filter'] = str(n_acc)+'Acc+'+fair_metric
         else:
             metrics['Filter'] = 'All models' if n_acc==150 else str(n_acc)+'Acc'
@@ -106,6 +107,7 @@ def compare_ensembles_fair_metrics(models_df, models_sols, fair_feature, X_test,
 
 def compare_ensembles_nds(models_df, models_sols, fair_feature, X_test, y_test):
     ensembles_metrics = [
+        ensemble_filter(models_df, models_sols, fair_feature, X_test, y_test, n_acc = 1),
         ensemble_filter(models_df, models_sols, fair_feature, X_test, y_test, n_acc = 150, fair_filter = False),
         ensemble_filter(models_df, models_sols, fair_feature, X_test, y_test, n_acc = 150, nds = True, with_acc=True),
         ensemble_filter(models_df, models_sols, fair_feature, X_test, y_test, n_acc = 50, nds = True, with_acc=True),
@@ -113,6 +115,19 @@ def compare_ensembles_nds(models_df, models_sols, fair_feature, X_test, y_test):
         ensemble_filter(models_df, models_sols, fair_feature, X_test, y_test, n_acc = 150, nds = True, with_acc=False),
         ensemble_filter(models_df, models_sols, fair_feature, X_test, y_test, n_acc = 50, nds = True, with_acc=False),
         ensemble_filter(models_df, models_sols, fair_feature, X_test, y_test, n_acc = 20, nds = True, with_acc=False)
+    ]
+    results_test = pd.DataFrame(ensembles_metrics)
+    results_test = results_test.set_index('Filter')
+    return results_test.copy()
+
+def compare_single_models(models_df, models_sols, fair_feature, X_test, y_test):
+    ensembles_metrics = [
+        ensemble_filter(models_df, models_sols, fair_feature, X_test, y_test, n_acc = 1),
+        ensemble_filter(models_df, models_sols, fair_feature, X_test, y_test, n_acc = 150, fair_filter = True, fair_metric='DP',n_fair=1),
+        ensemble_filter(models_df, models_sols, fair_feature, X_test, y_test, n_acc = 150, fair_filter = True, fair_metric='EO',n_fair=1),
+        ensemble_filter(models_df, models_sols, fair_feature, X_test, y_test, n_acc = 150, fair_filter = True, fair_metric='CV',n_fair=1),
+        ensemble_filter(models_df, models_sols, fair_feature, X_test, y_test, n_acc = 150, nds = True, with_acc=False, n_selected=1),
+        ensemble_filter(models_df, models_sols, fair_feature, X_test, y_test, n_acc = 150, nds = True, with_acc=True, n_selected=1),
     ]
     results_test = pd.DataFrame(ensembles_metrics)
     results_test = results_test.set_index('Filter')
