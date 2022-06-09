@@ -1,4 +1,4 @@
-from sklearn.metrics import confusion_matrix, accuracy_score
+from sklearn.metrics import confusion_matrix, accuracy_score, balanced_accuracy_score, f1_score
 from ..metric.metric import Metric
 import numpy as np
 
@@ -15,7 +15,7 @@ class FPRParity(Metric):
 
     def _FPR_np(self, y_true, y_pred):
         epsilon = 1e-7
-        tn, fp, fn, tp = confusion_matrix(y_true, y_pred).ravel()
+        tn, fp, fn, tp = confusion_matrix(y_true, y_pred, labels=[0,1]).ravel()
         #print("confusion", tn, fp, fn, tp)
         return(fp.astype(np.float32)/(fp.astype(np.float32) + tn.astype(np.float32) + epsilon))
 
@@ -52,7 +52,7 @@ class TPRParity(Metric):
 
     def _TPR_np(self, y_true, y_pred):
         epsilon = 1e-7
-        tn, fp, fn, tp = confusion_matrix(y_true, y_pred).ravel()
+        tn, fp, fn, tp = confusion_matrix(y_true, y_pred, labels=[0,1]).ravel()
         #print("confusion", tn, fp, fn, tp)
         return(tp.astype(np.float32)/(tp.astype(np.float32) + fn.astype(np.float32) + epsilon))
 
@@ -88,7 +88,7 @@ class TNRParity(Metric):
 
     def _TNR_np(self, y_true, y_pred):
         epsilon = 1e-7
-        tn, fp, fn, tp = confusion_matrix(y_true, y_pred).ravel()
+        tn, fp, fn, tp = confusion_matrix(y_true, y_pred, labels=[0,1]).ravel()
         #print("confusion", tn, fp, fn, tp)
         return(tn.astype(np.float32)/(tn.astype(np.float32) + fp.astype(np.float32) + epsilon))
 
@@ -124,7 +124,7 @@ class FNRParity(Metric):
 
     def _FNR_np(self, y_true, y_pred):
         epsilon = 1e-7
-        tn, fp, fn, tp = confusion_matrix(y_true, y_pred).ravel()
+        tn, fp, fn, tp = confusion_matrix(y_true, y_pred, labels=[0,1]).ravel()
         #print("confusion", tn, fp, fn, tp)
         return(fn.astype(np.float32)/(fn.astype(np.float32) + tp.astype(np.float32) + epsilon))
 
@@ -160,7 +160,7 @@ class DemParity(Metric):
 
     def _DP_np(self, y_true, y_pred):
         epsilon = 1e-7
-        tn, fp, fn, tp = confusion_matrix(y_true, y_pred).ravel()
+        tn, fp, fn, tp = confusion_matrix(y_true, y_pred, labels=[0,1]).ravel()
         pr = (tp.astype(np.float32)+fp) / (tp+fp+tn+fn)
         return(pr + epsilon)
 
@@ -196,7 +196,7 @@ class EqOportunity(Metric):
 
     def _TPR_np(self, y_true, y_pred):
         epsilon = 1e-7
-        tn, fp, fn, tp = confusion_matrix(y_true, y_pred).ravel()
+        tn, fp, fn, tp = confusion_matrix(y_true, y_pred, labels=[0,1]).ravel()
         #print("confusion", tn, fp, fn, tp)
         return(tp.astype(np.float32)/(tp.astype(np.float32) + fn.astype(np.float32) + epsilon))
 
@@ -233,7 +233,7 @@ class FPRDiff(Metric):
 
     def _FPR_np(self, y_true, y_pred):
         epsilon = 1e-7
-        tn, fp, fn, tp = confusion_matrix(y_true, y_pred).ravel()
+        tn, fp, fn, tp = confusion_matrix(y_true, y_pred, labels=[0,1]).ravel()
         #print("confusion", tn, fp, fn, tp)
         return(fp.astype(np.float32)/(fp.astype(np.float32) + tn.astype(np.float32) + epsilon))
 
@@ -270,7 +270,7 @@ class TPRDiff(Metric):
 
     def _TPR_np(self, y_true, y_pred):
         epsilon = 1e-7
-        tn, fp, fn, tp = confusion_matrix(y_true, y_pred).ravel()
+        tn, fp, fn, tp = confusion_matrix(y_true, y_pred, labels=[0,1]).ravel()
         #print("confusion", tn, fp, fn, tp)
         return(tp.astype(np.float32)/(tp.astype(np.float32) + fn.astype(np.float32) + epsilon))
 
@@ -306,7 +306,7 @@ class TNRDiff(Metric):
 
     def _TNR_np(self, y_true, y_pred):
         epsilon = 1e-7
-        tn, fp, fn, tp = confusion_matrix(y_true, y_pred).ravel()
+        tn, fp, fn, tp = confusion_matrix(y_true, y_pred, labels=[0,1]).ravel()
         #print("confusion", tn, fp, fn, tp)
         return(tn.astype(np.float32)/(tn.astype(np.float32) + fp.astype(np.float32) + epsilon))
 
@@ -342,7 +342,7 @@ class FNRDiff(Metric):
 
     def _FNR_np(self, y_true, y_pred):
         epsilon = 1e-7
-        tn, fp, fn, tp = confusion_matrix(y_true, y_pred).ravel()
+        tn, fp, fn, tp = confusion_matrix(y_true, y_pred, labels=[0,1]).ravel()
         #print("confusion", tn, fp, fn, tp)
         return(fn.astype(np.float32)/(fn.astype(np.float32) + tp.astype(np.float32) + epsilon))
 
@@ -378,7 +378,7 @@ class DPDiff(Metric):
 
     def _DP_np(self, y_true, y_pred):
         epsilon = 1e-7
-        tn, fp, fn, tp = confusion_matrix(y_true, y_pred).ravel()
+        tn, fp, fn, tp = confusion_matrix(y_true, y_pred, labels=[0,1]).ravel()
         if(self.good_value):
             pr = (tp.astype(np.float32)+fp) / (tp+fp+tn+fn)
         else:
@@ -466,3 +466,13 @@ class Accuracy(Metric):
     def evaluate(self, y_true, y_pred, x, model):
         y_pred = np.rint(y_pred)
         return(accuracy_score(y_true[:,[0]], y_pred))
+
+class BalancedAccuracy(Metric):
+    def evaluate(self, y_true, y_pred, x, model):
+        y_pred = np.rint(y_pred)
+        return(balanced_accuracy_score(y_true[:,[0]], y_pred))
+
+class F1Score(Metric):
+    def evaluate(self, y_true, y_pred, x, model):
+        y_pred = np.rint(y_pred)
+        return(f1_score(y_true[:,[0]], y_pred))
