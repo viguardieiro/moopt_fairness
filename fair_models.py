@@ -233,6 +233,88 @@ class EqualScalarization(w_interface, single_interface, scalar_interface):
         #print('objs', self.__objs)
         return self
 
+class EqOpScalarization(w_interface, single_interface, scalar_interface):
+    def __init__(self, X, y, fair_feat):
+        self.fair_feat = fair_feat
+        self.fair_att = sorted(X[fair_feat].unique())
+        self.__M = len(self.fair_att)+2
+        self.N = X.shape[0]
+        self.X = X.append(X.loc[y==1,:])
+        self.y = y.append(pd.Series(np.ones(sum(y==1))))
+
+    @property
+    def M(self):
+        return self.__M
+
+    @property
+    def feasible(self):
+        return True
+
+    @property
+    def optimum(self):
+        return True
+
+    @property
+    def objs(self):
+        return self.__objs
+
+    @property
+    def x(self):
+        return self.__x
+
+    @property
+    def w(self):
+        return self.__w
+
+    def optimize(self, w):
+        """Calculates the a multiobjective scalarization"""
+        if type(w) is int:
+            self.__w = np.zeros(self.M)
+            self.__w[w] = 1
+        elif type(w) is np.ndarray and w.ndim==1 and w.size==self.M:
+            self.__w = w
+        else:
+            raise('w is in the wrong format')
+        #print('w', self.__w)
+            
+        if self.__w[-1]==0:
+            lambd=10**-20
+        elif self.__w[-1]==1:
+            lambd=10**20
+        else:
+            lambd = self.__w[-1]/(1-self.__w[-1])
+        
+        loss_weight = self.__w[0]*(1+lambd)
+        equal_weight = self.__w[1:-1]*(1+lambd)
+        
+        sample_weight = self.X[self.fair_feat].replace({ff:fw for ff, fw in zip(self.fair_att,equal_weight)})
+        sample_weight[:self.N] = loss_weight
+        self.sample_weight = sample_weight
+        prec = np.mean(sample_weight)
+        
+        reg = LogisticRegression(multi_class='multinomial', solver='lbfgs',
+                                 penalty='l2', max_iter=10**4, tol=prec*10**-6, 
+                                 C=1/lambd).fit(self.X, self.y, sample_weight=sample_weight)
+        
+        y_pred = reg.predict_proba(self.X)
+        
+        self.__objs = np.zeros(self.M)
+        self.__objs[0] = log_loss(self.y[:self.N], y_pred[:self.N])*self.N
+        
+        for i, feat in enumerate(self.fair_att):
+            equal_weight = np.zeros(len(self.fair_att))
+            equal_weight[i] = 1
+            
+            sample_weight = self.X[self.fair_feat].replace({ff:fw for ff, fw in zip(self.fair_att,equal_weight)})
+            sample_weight[:self.N] = 0
+            
+            self.__objs[i+1] = log_loss(self.y, y_pred, sample_weight=sample_weight)*sum(self.X[self.fair_feat]==feat)/2
+        
+        self.__objs[-1] = squared_norm(reg.coef_)
+        self.__x = reg
+        #print('objs', self.__objs)
+        return self
+
 class MOOLogisticRegression():
     def __init__(self, X_train, y_train, X_val, y_val, fair_feat, scalarization, metric='accuracy', ensemble='voting'):
         self.X_train = X_train
@@ -446,3 +528,4 @@ class FindCCLogisticRegression():
         study.optimize(self.objective, n_trials=100)
         
         return self.best_model
+
