@@ -320,6 +320,38 @@ def evaluate_mooacep(fair_feature, X_train, y_train, X_val, y_val, X_test, y_tes
 
     return mooacep_metrics
 
+def evaluate_mooeo(fair_feature, X_train, y_train, X_val, y_val, X_test, y_test):
+    # Train 150 models
+    mooeo = monise(weightedScalar=EqOpScalarization(X_train, y_train, fair_feature),
+                singleScalar=EqOpScalarization(X_train, y_train, fair_feature),
+                nodeTimeLimit=2, targetSize=300,
+                targetGap=0, nodeGap=0.01, norm=False)
+
+    mooeo.optimize()
+
+    # Evaluate the models
+    mooeo_values_val = []
+    mooeo_sols = []
+
+    for solution in mooeo.solutionsList:
+        evaluate = evaluate_model_test(solution.x, fair_feature, X_val, y_val)
+        if evaluate['SingleClass']:
+            continue
+        mooeo_sols.append(solution.x)
+        mooeo_values_val.append(evaluate)
+
+    mooeo_df = pd.DataFrame(mooeo_values_val)
+
+    mooeo_metrics = ensemble_filter(mooeo_df, mooeo_sols, fair_feature, 
+                                    X_test, y_test, n_acc = 150, nds = True, with_acc=False, n_selected=10)
+
+    mooeo_metrics['Approach'] = 'MooEO'
+    del mooeo_metrics['Filter']
+
+    clear_output(wait=True)
+
+    return mooeo_metrics
+
 def evaluate_all_approaches(fair_feature, X_train, y_train, X_val, y_val, X_test, y_test):
     models_metrics = [evaluate_logreg(fair_feature, X_train, y_train, X_test, y_test),
                     evaluate_reweigh(fair_feature, X_train, y_train, X_test, y_test),
@@ -329,7 +361,8 @@ def evaluate_all_approaches(fair_feature, X_train, y_train, X_val, y_val, X_test
                     evaluate_minimax(fair_feature, X_train, y_train, X_val, y_val, X_test, y_test),
                     evaluate_mamofair(fair_feature, X_train, y_train, X_val, y_val, X_test, y_test),
                     evaluate_mooerr(fair_feature, X_train, y_train, X_val, y_val, X_test, y_test),
-                    evaluate_mooacep(fair_feature, X_train, y_train, X_val, y_val, X_test, y_test)
+                    evaluate_mooacep(fair_feature, X_train, y_train, X_val, y_val, X_test, y_test),
+                    evaluate_mooeo(fair_feature, X_train, y_train, X_val, y_val, X_test, y_test)
                     ]
 
     return pd.DataFrame(models_metrics).set_index('Approach')
