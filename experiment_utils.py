@@ -7,7 +7,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.linear_model import LogisticRegression
 from sklego.metrics import equal_opportunity_score
 from sklego.metrics import p_percent_score
-from sklearn.metrics import accuracy_score
+from sklearn.metrics import accuracy_score, balanced_accuracy_score, f1_score, log_loss, roc_auc_score
 from sklearn.model_selection import KFold
 
 from sklego.linear_model import DemographicParityClassifier
@@ -18,7 +18,7 @@ from moopt import monise
 
 from fair_models import coefficient_of_variation
 from fair_models import calc_reweight
-from fair_models import FairScalarization, EqualScalarization
+from fair_models import FairScalarization, EqualScalarization, EqOpScalarization
 from fair_models import SimpleVoting
 
 from model_aggregation import ensemble_filter
@@ -43,10 +43,18 @@ from MAMOfair.trainer import Trainer
 from MAMOfair.validator import Validator
 
 def evaluate_model_test(model__, fair_feature, X_test, y_test):
-    return {"Acc": accuracy_score(y_test, model__.predict(X_test)),
-            "EO": equal_opportunity_score(sensitive_column=fair_feature)(model__, X_test, y_test),
-            "DP": p_percent_score(sensitive_column=fair_feature)(model__,X_test),
-            "CV": coefficient_of_variation(model__, X_test, y_test)}
+    y_pred = model__.predict(X_test)
+    metrics = {"Acc": accuracy_score(y_test, y_pred),
+                "BalancedAcc": balanced_accuracy_score(y_test, model__.predict(X_test)),
+                "F-score": f1_score(y_test, model__.predict(X_test)),
+                "EO": equal_opportunity_score(sensitive_column=fair_feature)(model__, X_test, y_test),
+                "DP": p_percent_score(sensitive_column=fair_feature)(model__,X_test),
+                "CV": coefficient_of_variation(model__, X_test, y_test)}
+    metrics["SingleClass"] = False
+    if len(np.unique(y_pred))==1:
+        #raise Exception("Model classifies every point to the same class") 
+        metrics["SingleClass"] = True
+    return metrics
 
 
 def evaluate_logreg(fair_feature, X_train, y_train, X_test, y_test):
@@ -182,11 +190,13 @@ def evaluate_mamofair(fair_feature, X_train, y_train, X_val, y_val, X_test, y_te
     test_data = CustomDataset(X1, y1)
 
     accuracy = Accuracy(name='accuracy')
+    baccuracy = BalancedAccuracy(name='bacc')
+    f1score = F1Score(name='f1score')
     dp = DemParity(name='DP')
     eo = EqOportunity(name='EO')
     cv = CoVariation(name='CV')
     
-    validation_metrics = [accuracy, eo, dp, cv]
+    validation_metrics = [accuracy, baccuracy, f1score, eo, dp, cv]
 
     data_handler = FairnessDataHandler('data', train_data, val_data, test_data)
 
@@ -235,9 +245,11 @@ def evaluate_mamofair(fair_feature, X_train, y_train, X_val, y_val, X_test, y_te
     test_metrics, test_losses = test_validator.evaluate()
 
     mamofair_model = {"Acc": test_metrics[0],
-                      "EO": test_metrics[1],
-                      "DP": test_metrics[2],
-                      "CV": test_metrics[3],
+                      "BalancedAcc": test_metrics[1],
+                      "F-score": test_metrics[2],
+                      "EO": test_metrics[3],
+                      "DP": test_metrics[4],
+                      "CV": test_metrics[5],
                       "Approach": 'MAMOFair'
     }
 
@@ -258,13 +270,16 @@ def evaluate_mooerr(fair_feature, X_train, y_train, X_val, y_val, X_test, y_test
     mooerr_sols = []
 
     for solution in moo_err.solutionsList:
+        evaluate = evaluate_model_test(solution.x, fair_feature, X_val, y_val)
+        if evaluate['SingleClass']:
+            continue
         mooerr_sols.append(solution.x)
-        mooerr_values.append(evaluate_model_test(solution.x, fair_feature, X_val, y_val))
+        mooerr_values.append(evaluate)
 
     mooerr_df = pd.DataFrame(mooerr_values)
 
     mooerr_metrics = ensemble_filter(mooerr_df, mooerr_sols, fair_feature, 
-                                    X_test, y_test, n_acc = 150, nds = True, with_acc=True)
+                                    X_test, y_test, n_acc = 150, nds = True, with_acc=False, n_selected=10)
 
     mooerr_metrics['Approach'] = 'MooErr'
     del mooerr_metrics['Filter']
@@ -287,13 +302,16 @@ def evaluate_mooacep(fair_feature, X_train, y_train, X_val, y_val, X_test, y_tes
     mooacep_sols = []
 
     for solution in mooacep.solutionsList:
+        evaluate = evaluate_model_test(solution.x, fair_feature, X_val, y_val)
+        if evaluate['SingleClass']:
+            continue 
         mooacep_sols.append(solution.x)
-        mooacep_values_val.append(evaluate_model_test(solution.x, fair_feature, X_val, y_val))
+        mooacep_values_val.append(evaluate)
 
     mooacep_df = pd.DataFrame(mooacep_values_val)
 
     mooacep_metrics = ensemble_filter(mooacep_df, mooacep_sols, fair_feature, 
-                                    X_test, y_test, n_acc = 150, nds = True, with_acc=True)
+                                    X_test, y_test, n_acc = 150, nds = True, with_acc=False, n_selected=10)
 
     mooacep_metrics['Approach'] = 'MooAcep'
     del mooacep_metrics['Filter']
@@ -311,7 +329,8 @@ def evaluate_all_approaches(fair_feature, X_train, y_train, X_val, y_val, X_test
                     evaluate_minimax(fair_feature, X_train, y_train, X_val, y_val, X_test, y_test),
                     evaluate_mamofair(fair_feature, X_train, y_train, X_val, y_val, X_test, y_test),
                     evaluate_mooerr(fair_feature, X_train, y_train, X_val, y_val, X_test, y_test),
-                    evaluate_mooacep(fair_feature, X_train, y_train, X_val, y_val, X_test, y_test)]
+                    evaluate_mooacep(fair_feature, X_train, y_train, X_val, y_val, X_test, y_test)
+                    ]
 
     return pd.DataFrame(models_metrics).set_index('Approach')
 
