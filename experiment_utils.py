@@ -3,25 +3,29 @@ import pandas as pd
 import numpy as np
 from IPython.display import clear_output
 
-from sklearn.model_selection import train_test_split
 from sklearn.linear_model import LogisticRegression
 from sklego.metrics import equal_opportunity_score
 from sklego.metrics import p_percent_score
-from sklearn.metrics import accuracy_score, balanced_accuracy_score, f1_score, log_loss, roc_auc_score
+from sklearn.metrics import accuracy_score, balanced_accuracy_score, f1_score
 from sklearn.model_selection import KFold
 
+from sklearn.linear_model import LogisticRegression
+from fair_models import calc_reweight
+
+# Fairness metrics
 from sklego.linear_model import DemographicParityClassifier
 from sklego.linear_model import EqualOpportunityClassifier
-from sklearn.linear_model import LogisticRegression
-
-from moopt import monise
-
 from fair_models import coefficient_of_variation
-from fair_models import calc_reweight
-from fair_models import FairScalarization, EqualScalarization, EqOpScalarization
-from fair_models import SimpleVoting
 
+# Functions for MooAcep, MooErr, and MooEqOp
+from moopt import monise
+from fair_models import FairScalarization, EqualScalarization, EqOpScalarization
 from model_aggregation import ensemble_filter
+
+# Functions for PrefFair
+from cvxpy import *
+from fair_classification_modified.linear_clf_pref_fairness import LinearClf
+import fair_classification_modified.stats_pref_fairness as compute_stats
 
 # Functions to Minimax
 from MMPF.MinimaxParetoFair.MMPF_trainer import SKLearn_Weighted_LLR, APSTAR
@@ -44,9 +48,10 @@ from MAMOfair.validator import Validator
 
 def evaluate_model_test(model__, fair_feature, X_test, y_test):
     y_pred = model__.predict(X_test)
+
     metrics = {"Acc": accuracy_score(y_test, y_pred),
-                "BalancedAcc": balanced_accuracy_score(y_test, model__.predict(X_test)),
-                "F-score": f1_score(y_test, model__.predict(X_test)),
+                "BalancedAcc": balanced_accuracy_score(y_test, y_pred),
+                "F-score": f1_score(y_test, y_pred),
                 "EO": equal_opportunity_score(sensitive_column=fair_feature)(model__, X_test, y_test),
                 "DP": p_percent_score(sensitive_column=fair_feature)(model__,X_test),
                 "CV": coefficient_of_variation(model__, X_test, y_test)}
@@ -99,6 +104,64 @@ def evaluate_eqop(fair_feature, X_train, y_train, X_test, y_test):
     eqop_metrics['Approach'] = 'EqOp'
 
     return eqop_metrics
+
+def evaluate_preffair(fair_feature, X_train, y_train, X_test, y_test):
+    x_train = X_train.loc[:, X_train.columns != fair_feature].values
+    x_train = compute_stats.add_intercept(x_train)
+    x_sensitive_train = X_train[[fair_feature]].values
+    y_train = y_train.to_frame().values
+
+    # Classifier parameters 
+    loss_function = "logreg" # perform the experiments with logistic regression
+    EPS = 1e-3
+
+    # Parity classifier
+    cons_params = {}
+    cons_params["EPS"] = EPS
+    cons_params["cons_type"] = 0
+    clf = LinearClf(loss_function, lam=1e-5, train_multiple=False)
+    clf.fit(x_train, y_train, x_sensitive_train, cons_params)
+
+    # compute the proxy value, will need this for the preferential classifiers
+    dist_arr,dist_dict=clf.get_distance_boundary(x_train, X_train[fair_feature].values)
+    s_val_to_cons_sum_di = compute_stats.get_sensitive_attr_cov(dist_dict)
+
+    # Train Preferred treatment AND preferred impact classifier
+    cons_params["cons_type"] = 3
+    cons_params["s_val_to_cons_sum"] = s_val_to_cons_sum_di
+    lam = {0:1e-5, 1:1e-5}
+
+    pref_model = LinearClf(loss_function, lam=lam, train_multiple=True)
+    pref_model.fit(x_train, y_train, X_train[fair_feature].values, cons_params)
+
+    class PrefFair:
+        def __init__(self, w, fair_feature, X_train, y_train):
+            self.w = w
+            self.fair_feature = fair_feature
+
+            clf0 = LogisticRegression(random_state=0).fit(X_train.loc[:, X_train.columns != fair_feature], y_train)
+            clf0.coef_ = w[0].value[1:].T
+            clf0.intercept_ =  w[0].value[0][0]
+            self.clf0 = clf0
+
+            clf1 = LogisticRegression(random_state=0).fit(X_train.loc[:, X_train.columns != fair_feature], y_train)
+            clf1.coef_ = w[1].value[1:].T
+            clf1.intercept_ =  w[1].value[0][0]
+            self.clf1 = clf1
+
+        def predict(self, X):
+            pred_clf0 = self.clf0.predict(X.loc[:, X.columns != self.fair_feature])
+            pred_clf1 = self.clf1.predict(X.loc[:, X.columns != self.fair_feature])
+
+            return (pred_clf0*(1-X[self.fair_feature])+pred_clf1*X[self.fair_feature])
+
+    preffair_model = PrefFair(pref_model.w, fair_feature, X_train.copy(), y_train)
+
+    # Evaluate
+    pref_metrics = evaluate_model_test(preffair_model, fair_feature, X_test.copy(), y_test)
+    pref_metrics['Approach'] = 'PrefFair'
+
+    return pref_metrics
 
 def evaluate_minimax(fair_feature, X_train, y_train, X_val, y_val, X_test, y_test):
     # Train
@@ -357,6 +420,7 @@ def evaluate_all_approaches(fair_feature, X_train, y_train, X_val, y_val, X_test
                     evaluate_reweigh(fair_feature, X_train, y_train, X_test, y_test),
                     evaluate_dempar(fair_feature, X_train, y_train, X_test, y_test),
                     evaluate_eqop(fair_feature, X_train, y_train, X_test, y_test),
+                    evaluate_preffair(fair_feature, X_train, y_train, X_test, y_test),
                     evaluate_adafair(fair_feature, X_train, y_train, X_test, y_test),
                     evaluate_minimax(fair_feature, X_train, y_train, X_val, y_val, X_test, y_test),
                     evaluate_mamofair(fair_feature, X_train, y_train, X_val, y_val, X_test, y_test),
