@@ -50,8 +50,8 @@ def evaluate_model_test(model__, fair_feature, X_test, y_test):
     y_pred = model__.predict(X_test)
 
     metrics = {"Acc": accuracy_score(y_test, y_pred),
-                "BalancedAcc": balanced_accuracy_score(y_test, y_pred),
-                "F-score": f1_score(y_test, y_pred),
+                #"BalancedAcc": balanced_accuracy_score(y_test, y_pred),
+                #"F-score": f1_score(y_test, y_pred),
                 "EO": equal_opportunity_score(sensitive_column=fair_feature)(model__, X_test, y_test),
                 "DP": p_percent_score(sensitive_column=fair_feature)(model__,X_test),
                 "CV": coefficient_of_variation(model__, X_test, y_test)}
@@ -193,7 +193,7 @@ def evaluate_minimax(fair_feature, X_train, y_train, X_val, y_val, X_test, y_tes
 def evaluate_adafair(fair_feature, X_train, y_train, X_test, y_test):
     sa_index = list(X_train.columns).index(fair_feature)
     # Train
-    adafair_model = AdaFair(n_estimators=300, saIndex=sa_index, saValue=0, c=1)
+    adafair_model = AdaFair(n_estimators=150, saIndex=sa_index, saValue=0, c=1)
     adafair_model.fit(X_train, y_train)
 
     # Evaluate
@@ -308,8 +308,8 @@ def evaluate_mamofair(fair_feature, X_train, y_train, X_val, y_val, X_test, y_te
     test_metrics, test_losses = test_validator.evaluate()
 
     mamofair_model = {"Acc": test_metrics[0],
-                      "BalancedAcc": test_metrics[1],
-                      "F-score": test_metrics[2],
+                      #"BalancedAcc": test_metrics[1],
+                      #"F-score": test_metrics[2],
                       "EO": test_metrics[3],
                       "DP": test_metrics[4],
                       "CV": test_metrics[5],
@@ -318,12 +318,12 @@ def evaluate_mamofair(fair_feature, X_train, y_train, X_val, y_val, X_test, y_te
 
     return mamofair_model
 
-def evaluate_mooerr(fair_feature, X_train, y_train, X_val, y_val, X_test, y_test, metric='EO'):
+def evaluate_mooerr(fair_feature, X_train, y_train, X_val, y_val, X_test, y_test, remove_trivial=False,
+                    ):
     # Train
-    ## Train 150 models
     moo_err = monise(weightedScalar=FairScalarization(X_train, y_train, fair_feature),
                     singleScalar=FairScalarization(X_train, y_train, fair_feature),
-                    nodeTimeLimit=2, targetSize=300,
+                    nodeTimeLimit=2, targetSize=150,
                     targetGap=0, nodeGap=0.05, norm=False)
 
     moo_err.optimize()
@@ -334,15 +334,18 @@ def evaluate_mooerr(fair_feature, X_train, y_train, X_val, y_val, X_test, y_test
 
     for solution in moo_err.solutionsList:
         evaluate = evaluate_model_test(solution.x, fair_feature, X_val, y_val)
-        if evaluate['SingleClass']:
+        if remove_trivial and evaluate['SingleClass']:
             continue
         mooerr_sols.append(solution.x)
         mooerr_values.append(evaluate)
 
     mooerr_df = pd.DataFrame(mooerr_values)
+    total_models = mooerr_df.shape[0]
+    n_acc = total_models
+    n_selected = np.min([n_acc, 10])
 
     mooerr_metrics = ensemble_filter(mooerr_df, mooerr_sols, fair_feature, 
-                                    X_test, y_test, n_acc = 150, nds = True, with_acc=False, n_selected=10)
+                                    X_test, y_test, n_acc = n_acc, nds = True, with_acc=True, n_selected=n_selected)
 
     mooerr_metrics['Approach'] = 'MooErr'
     del mooerr_metrics['Filter']
@@ -351,11 +354,11 @@ def evaluate_mooerr(fair_feature, X_train, y_train, X_val, y_val, X_test, y_test
 
     return mooerr_metrics
 
-def evaluate_mooacep(fair_feature, X_train, y_train, X_val, y_val, X_test, y_test):
-    # Train 150 models
+def evaluate_mooacep(fair_feature, X_train, y_train, X_val, y_val, X_test, y_test, remove_trivial=True):
+
     mooacep = monise(weightedScalar=EqualScalarization(X_train, y_train, fair_feature),
                 singleScalar=EqualScalarization(X_train, y_train, fair_feature),
-                nodeTimeLimit=2, targetSize=300,
+                nodeTimeLimit=2, targetSize=150,
                 targetGap=0, nodeGap=0.01, norm=False)
 
     mooacep.optimize()
@@ -366,15 +369,18 @@ def evaluate_mooacep(fair_feature, X_train, y_train, X_val, y_val, X_test, y_tes
 
     for solution in mooacep.solutionsList:
         evaluate = evaluate_model_test(solution.x, fair_feature, X_val, y_val)
-        if evaluate['SingleClass']:
+        if remove_trivial and evaluate['SingleClass']:
             continue 
         mooacep_sols.append(solution.x)
         mooacep_values_val.append(evaluate)
 
     mooacep_df = pd.DataFrame(mooacep_values_val)
+    total_models = mooacep_df.shape[0]
+    n_acc = np.max([total_models//3,1])
+    n_selected = np.min([n_acc, 10])
 
     mooacep_metrics = ensemble_filter(mooacep_df, mooacep_sols, fair_feature, 
-                                    X_test, y_test, n_acc = 150, nds = True, with_acc=False, n_selected=10)
+                                    X_test, y_test, n_acc = n_acc, nds = True, with_acc=True, n_selected=n_selected)
 
     mooacep_metrics['Approach'] = 'MooAcep'
     del mooacep_metrics['Filter']
@@ -383,11 +389,11 @@ def evaluate_mooacep(fair_feature, X_train, y_train, X_val, y_val, X_test, y_tes
 
     return mooacep_metrics
 
-def evaluate_mooeo(fair_feature, X_train, y_train, X_val, y_val, X_test, y_test):
+def evaluate_mooeo(fair_feature, X_train, y_train, X_val, y_val, X_test, y_test, remove_trivial=False):
     # Train 150 models
     mooeo = monise(weightedScalar=EqOpScalarization(X_train, y_train, fair_feature),
                 singleScalar=EqOpScalarization(X_train, y_train, fair_feature),
-                nodeTimeLimit=2, targetSize=300,
+                nodeTimeLimit=2, targetSize=150,
                 targetGap=0, nodeGap=0.01, norm=False)
 
     mooeo.optimize()
@@ -398,7 +404,7 @@ def evaluate_mooeo(fair_feature, X_train, y_train, X_val, y_val, X_test, y_test)
 
     for solution in mooeo.solutionsList:
         evaluate = evaluate_model_test(solution.x, fair_feature, X_val, y_val)
-        if evaluate['SingleClass']:
+        if remove_trivial and evaluate['SingleClass']:
             continue
         mooeo_sols.append(solution.x)
         mooeo_values_val.append(evaluate)
@@ -406,7 +412,7 @@ def evaluate_mooeo(fair_feature, X_train, y_train, X_val, y_val, X_test, y_test)
     mooeo_df = pd.DataFrame(mooeo_values_val)
 
     mooeo_metrics = ensemble_filter(mooeo_df, mooeo_sols, fair_feature, 
-                                    X_test, y_test, n_acc = 150, nds = True, with_acc=False, n_selected=10)
+                                    X_test, y_test, n_acc = 50, nds = True, with_acc=True, n_selected=10)
 
     mooeo_metrics['Approach'] = 'MooEO'
     del mooeo_metrics['Filter']
@@ -415,23 +421,24 @@ def evaluate_mooeo(fair_feature, X_train, y_train, X_val, y_val, X_test, y_test)
 
     return mooeo_metrics
 
-def evaluate_all_approaches(fair_feature, X_train, y_train, X_val, y_val, X_test, y_test):
+def evaluate_all_approaches(fair_feature, X_train, y_train, X_val, y_val, X_test, y_test, remove_trivial):
     models_metrics = [evaluate_logreg(fair_feature, X_train, y_train, X_test, y_test),
                     evaluate_reweigh(fair_feature, X_train, y_train, X_test, y_test),
                     evaluate_dempar(fair_feature, X_train, y_train, X_test, y_test),
                     evaluate_eqop(fair_feature, X_train, y_train, X_test, y_test),
-                    evaluate_preffair(fair_feature, X_train, y_train, X_test, y_test),
-                    evaluate_adafair(fair_feature, X_train, y_train, X_test, y_test),
+                    #evaluate_preffair(fair_feature, X_train, y_train, X_test, y_test),
                     evaluate_minimax(fair_feature, X_train, y_train, X_val, y_val, X_test, y_test),
+                    evaluate_mooerr(fair_feature, X_train, y_train, X_val, y_val, X_test, y_test, remove_trivial),
+                    evaluate_mooacep(fair_feature, X_train, y_train, X_val, y_val, X_test, y_test, remove_trivial),
+                    evaluate_mooeo(fair_feature, X_train, y_train, X_val, y_val, X_test, y_test, remove_trivial),
+                    evaluate_adafair(fair_feature, X_train, y_train, X_test, y_test),
                     evaluate_mamofair(fair_feature, X_train, y_train, X_val, y_val, X_test, y_test),
-                    evaluate_mooerr(fair_feature, X_train, y_train, X_val, y_val, X_test, y_test),
-                    evaluate_mooacep(fair_feature, X_train, y_train, X_val, y_val, X_test, y_test),
-                    evaluate_mooeo(fair_feature, X_train, y_train, X_val, y_val, X_test, y_test)
                     ]
+    models_metrics_df = pd.DataFrame(models_metrics).set_index('Approach')
 
-    return pd.DataFrame(models_metrics).set_index('Approach')
+    return models_metrics_df
 
-def kfold_methods(X, y, X_test, y_test, fair_feature, n_folds = 5):
+def kfold_methods(X, y, X_test, y_test, fair_feature, n_folds = 5, remove_trivial=False):
     results_test = pd.DataFrame()
 
     kf = KFold(n_splits=n_folds, random_state=None, shuffle=False)
@@ -445,7 +452,7 @@ def kfold_methods(X, y, X_test, y_test, fair_feature, n_folds = 5):
         X_train, y_train = X.iloc[train_index], y.iloc[train_index]
         X_val, y_val = X.iloc[tv_index], y.iloc[tv_index]
 
-        eval_result = evaluate_all_approaches(fair_feature, X_train, y_train, X_val, y_val, X_test, y_test)
+        eval_result = evaluate_all_approaches(fair_feature, X_train, y_train, X_val, y_val, X_test, y_test, remove_trivial)
 
         results_test = pd.concat((results_test, eval_result))
 

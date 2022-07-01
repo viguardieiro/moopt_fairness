@@ -49,7 +49,7 @@ with open("data/"+dataset+"_"+fair_feature+"/y_ftest.pickle", 'rb') as f:
 
 # %%
 kfold_results = experiment_utils.kfold_methods(X, y, X_ftest, y_ftest, 
-                                                fair_feature, n_folds = 5)
+                                                fair_feature, n_folds = 5, remove_trivial=True)
 
 # %%
 german_results_mean = kfold_results.groupby('Approach').mean()
